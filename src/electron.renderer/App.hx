@@ -34,6 +34,7 @@ class App extends dn.Process {
 
 	public var keyBindings : Array<KeyBinding> = [];
 	var debugFlags : Map<DebugFlag,Bool> = new Map();
+	public var gldtkSidebar : ui.GldtkSidebar;
 
 	public function new() {
 		super();
@@ -186,6 +187,7 @@ class App extends dn.Process {
 		updateBodyClasses();
 		LOG.flushOnAdd = false;
 		initKeyBindings();
+		gldtkSidebar = new ui.GldtkSidebar();
 	}
 
 

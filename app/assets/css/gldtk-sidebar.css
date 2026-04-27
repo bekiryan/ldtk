@@ -1,0 +1,237 @@
+/* GLDtk sidebar — positioning + chat only.
+   Buttons, inputs, selects, textareas inherit LDtk's own app.min.css. */
+
+/* ── Toggle tab ─────────────────────────────────────────────────────────── */
+#gldtk-toggle {
+  position: fixed;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  width: 22px;
+  height: 60px;
+  z-index: 100001;
+  padding: 0;
+  margin: 0;
+  border-radius: 4px 0 0 4px;
+  background: #545d73;
+  color: #c1cfeb;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  writing-mode: vertical-rl;
+  text-transform: uppercase;
+  cursor: pointer;
+  border: none;
+  box-shadow: -2px 0 6px rgba(0,0,0,.4);
+  transition: background .15s;
+}
+#gldtk-toggle:hover,
+#gldtk-toggle.open { background: #e34d00; color: #fff; }
+
+/* ── Sidebar shell ──────────────────────────────────────────────────────── */
+#gldtk-root {
+  position: fixed;
+  top: 0; right: 0;
+  width: 300px;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #1e2229;
+  border-left: 2px solid #2e333f;
+  z-index: 100000;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 11px;
+  color: #c1cfeb;
+  overflow: hidden;
+}
+#gldtk-root.collapsed { width: 0; border: none; }
+
+/* ── Title bar ──────────────────────────────────────────────────────────── */
+#gldtk-root .g-titlebar {
+  display: flex;
+  align-items: center;
+  padding: 8px 10px;
+  background: #2e333f;
+  border-bottom: 1px solid #545d73;
+  flex-shrink: 0;
+}
+#gldtk-root .g-title {
+  font-weight: 700;
+  font-size: 13px;
+  color: #ffcc00;
+  flex: 1;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+#gldtk-root .g-status {
+  font-size: 10px;
+  color: #545d73;
+}
+
+/* ── Chat history ───────────────────────────────────────────────────────── */
+#gldtk-root .g-history,
+#gldtk-root .g-history * {
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+}
+
+#gldtk-root .g-history {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+#gldtk-root .g-msg {
+  padding: 7px 9px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+#gldtk-root .g-msg-user {
+  align-self: flex-end;
+  background: #2e333f;
+  border: 1px solid #545d73;
+  max-width: 92%;
+}
+#gldtk-root .g-msg-ai {
+  align-self: flex-start;
+  background: #1e2229;
+  border: 1px solid #3c4455;
+  max-width: 98%;
+}
+#gldtk-root .g-msg-err {
+  align-self: stretch;
+  background: #3a1010;
+  border: 1px solid #e34d00;
+  color: #ffa386;
+}
+#gldtk-root .g-meta {
+  display: block;
+  font-size: 9px;
+  color: #545d73;
+  margin-bottom: 3px;
+  text-transform: uppercase;
+  letter-spacing: .3px;
+}
+#gldtk-root .g-ok {
+  display: block;
+  margin-top: 5px;
+  color: #cfdd40;
+  font-size: 10px;
+}
+#gldtk-root pre.g-ascii {
+  margin: 5px 0 0;
+  padding: 5px;
+  background: #0d0f14;
+  border-radius: 3px;
+  font-size: 8px;
+  line-height: 1.2;
+  color: #cfdd40;
+  overflow-x: auto;
+  white-space: pre;
+}
+
+/* ── Current file indicator ─────────────────────────────────────────────── */
+#gldtk-root .g-file-row {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 2px 3px;
+  font-size: 10px;
+  color: #737f9d;
+  border-bottom: 1px solid #2e333f;
+  margin-bottom: 2px;
+  min-height: 22px;
+}
+#gldtk-root .g-file-row.g-file-none { color: #e34d00; font-style: italic; }
+#gldtk-root .g-file-icon { flex-shrink: 0; }
+#gldtk-root .g-file-name { color: #c1cfeb; font-size: 11px; word-break: break-all; }
+#gldtk-root .g-file-label { font-size: 10px; }
+
+/* ── Form area ──────────────────────────────────────────────────────────── */
+#gldtk-root .g-form {
+  flex-shrink: 0;
+  padding: 6px 8px 10px;
+  border-top: 1px solid #2e333f;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  max-height: 55vh;
+}
+#gldtk-root .g-section {
+  font-size: 9px;
+  font-weight: 700;
+  color: #545d73;
+  letter-spacing: .6px;
+  padding: 6px 2px 2px;
+}
+#gldtk-root .g-hint {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  color: #3c4455;
+}
+#gldtk-root .g-field {
+  display: flex;
+  gap: 4px;
+}
+
+/* Inputs/selects/textarea fill the field width */
+#gldtk-root .g-field input,
+#gldtk-root .g-field select,
+#gldtk-root .g-field textarea {
+  flex: 1;
+  width: 100%;
+  box-sizing: border-box;
+  font-size: 11px;
+}
+#gldtk-root .g-field textarea { height: 62px; }
+
+/* ── Difficulty row ─────────────────────────────────────────────────────── */
+#gldtk-root .g-diff-row { gap: 0; }
+#gldtk-root .g-diff-btn {
+  flex: 1;
+  margin: 0;
+  padding: 6px 2px;
+  font-size: 10px;
+  background: #2e333f;
+  color: #737f9d;
+  border: 1px solid #545d73;
+  box-shadow: none;
+  text-transform: uppercase;
+  letter-spacing: .4px;
+}
+#gldtk-root .g-diff-btn:first-child { border-radius: 3px 0 0 3px; }
+#gldtk-root .g-diff-btn:last-child  { border-radius: 0 3px 3px 0; }
+#gldtk-root .g-diff-btn.active {
+  background: #e34d00;
+  color: #fff;
+  border-color: #e34d00;
+}
+#gldtk-root .g-diff-btn:hover:not(.active) { background: #3c4455; color: #c1cfeb; }
+
+/* ── Size row ───────────────────────────────────────────────────────────── */
+#gldtk-root .g-size-row { align-items: center; }
+#gldtk-root .g-size-row input { width: 0; flex: 1; }
+#gldtk-root .g-size-x {
+  flex-shrink: 0;
+  color: #545d73;
+  font-size: 12px;
+  padding: 0 3px;
+}
+
+/* ── Generate button ────────────────────────────────────────────────────── */
+#gldtk-root .g-gen-btn {
+  width: 100%;
+  margin: 4px 0 0;
+  padding: 9px;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .5px;
+}
+#gldtk-root .g-gen-btn:disabled { opacity: .4; cursor: not-allowed; }
