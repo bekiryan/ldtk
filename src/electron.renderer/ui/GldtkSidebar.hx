@@ -11,7 +11,6 @@ class GldtkSidebar {
 
 	static inline var SERVER   = "http://127.0.0.1:8765";
 	static inline var HIST_KEY = "gldtk_history";
-	static inline var DIFF_KEY = "gldtk_difficulty";
 
 	var jRoot      : J;
 	var jToggle    : J;
@@ -20,7 +19,6 @@ class GldtkSidebar {
 	var jBtn       : J;
 	var jStatus    : J;
 	var jFile      : J;
-	var difficulty : String = "medium";
 	var collapsed  : Bool   = false;
 	var busy       : Bool   = false;
 
@@ -60,40 +58,6 @@ class GldtkSidebar {
 					<span class="g-file-label">No project open</span>
 				</div>
 
-				<div class="g-section">THEME</div>
-				<div class="g-field">
-					<select id="g-theme">
-						<option value="">Auto-detect</option>
-						<option value="dungeon">Dungeon</option>
-						<option value="forest">Forest</option>
-						<option value="sky">Sky</option>
-					</select>
-				</div>
-
-				<div class="g-section">DIFFICULTY</div>
-				<div class="g-field g-diff-row">
-					<button id="dEasy"   class="g-diff-btn">Easy</button>
-					<button id="dMedium" class="g-diff-btn">Med</button>
-					<button id="dHard"   class="g-diff-btn">Hard</button>
-				</div>
-
-				<div class="g-section">ENEMIES &nbsp;<span class="g-hint">comma-separated</span></div>
-				<div class="g-field">
-					<input type="text" id="g-enemies" placeholder="Goblin, Slime, …"/>
-				</div>
-
-				<div class="g-section">PLATFORMS</div>
-				<div class="g-field">
-					<input type="number" id="g-platforms" min="2" max="30" placeholder="auto"/>
-				</div>
-
-				<div class="g-section">SIZE &nbsp;<span class="g-hint">width × height tiles</span></div>
-				<div class="g-field g-size-row">
-					<input type="number" id="g-width"  min="20" max="300" placeholder="60"/>
-					<span class="g-size-x">×</span>
-					<input type="number" id="g-height" min="10" max="100" placeholder="20"/>
-				</div>
-
 				<div class="g-section">PROMPT</div>
 				<div class="g-field">
 					<textarea id="g-prompt" rows="4"
@@ -115,9 +79,6 @@ class GldtkSidebar {
 		jFile    = jRoot.find("#g-file-row");
 
 		jBtn.click( _-> if( !busy ) generate() );
-		jRoot.find("#dEasy").click(   _-> setDiff("easy")   );
-		jRoot.find("#dMedium").click( _-> setDiff("medium") );
-		jRoot.find("#dHard").click(   _-> setDiff("hard")   );
 
 		jPrompt.on("keydown", function(ev:js.jquery.Event) {
 			var ke : js.html.KeyboardEvent = cast Reflect.field(ev, "originalEvent");
@@ -150,13 +111,7 @@ class GldtkSidebar {
 
 	function saveStr(k:String, v:String) js.Browser.window.localStorage.setItem(k, v);
 
-	function loadStr(k:String, ?def:String) : String {
-		var v = js.Browser.window.localStorage.getItem(k);
-		return v != null ? v : (def != null ? def : "");
-	}
-
 	function restoreState() {
-		setDiff( loadStr(DIFF_KEY, "medium") );
 		refreshFileRow();
 	}
 
@@ -177,13 +132,6 @@ class GldtkSidebar {
 		if( !collapsed ) refreshFileRow();
 		jRoot.toggleClass("collapsed", collapsed);
 		jToggle.toggleClass("open", !collapsed);
-	}
-
-	function setDiff(d:String) {
-		difficulty = d;
-		saveStr(DIFF_KEY, d);
-		for( n in ["Easy","Medium","Hard"] )
-			jRoot.find("#d"+n).toggleClass("active", n.toLowerCase() == d);
 	}
 
 	function setStatus(s:String) jStatus.text(s);
@@ -216,48 +164,16 @@ class GldtkSidebar {
 			return;
 		}
 
-		var theme      = jRoot.find("#g-theme").val();
-		var enemiesRaw = jRoot.find("#g-enemies").val();
-		var platRaw    = jRoot.find("#g-platforms").val();
-
-		var enemies : Array<String> = [];
-		if( enemiesRaw != null && StringTools.trim(enemiesRaw).length > 0 )
-			enemies = [for( s in enemiesRaw.split(",") ) StringTools.trim(s)].filter( s -> s.length > 0 );
-
-		var platforms : Null<Int> = null;
-		if( platRaw != null && platRaw != "" ) {
-			var p = Std.parseInt(platRaw);
-			if( p != null && p > 0 ) platforms = p;
-		}
-
-		var widthTiles  : Null<Int> = null;
-		var heightTiles : Null<Int> = null;
-		var wRaw = jRoot.find("#g-width").val();
-		var hRaw = jRoot.find("#g-height").val();
-		if( wRaw != null && wRaw != "" ) { var v = Std.parseInt(wRaw); if( v != null && v >= 20 ) widthTiles  = v; }
-		if( hRaw != null && hRaw != "" ) { var v = Std.parseInt(hRaw); if( v != null && v >= 10 ) heightTiles = v; }
-
-		var metaParts = [];
-		if( theme != null && theme != "" ) metaParts.push("theme:" + theme);
-		if( enemies.length > 0 ) metaParts.push("enemies:" + enemies.join("+"));
-		if( platforms != null )  metaParts.push("platforms:" + platforms);
-		metaParts.push("difficulty:" + difficulty);
-		appendMsg("user", '<span class="g-meta">${metaParts.join(" · ")}</span>${description}');
+		appendMsg("user", description);
 
 		setBusy(true);
 		setStatus("generating…");
 
 		var payload : Dynamic = {
 			description: description,
-			difficulty:  difficulty,
 			output_path: outPath,
 			seed:        Std.int( Math.random() * 100000 ),
 		};
-		if( theme != null && theme != "" ) Reflect.setField(payload, "theme", theme);
-		if( enemies.length > 0 )           Reflect.setField(payload, "enemy_types", enemies);
-		if( platforms != null )            Reflect.setField(payload, "platform_count", platforms);
-		if( widthTiles  != null )          Reflect.setField(payload, "width_tiles",  widthTiles);
-		if( heightTiles != null )          Reflect.setField(payload, "height_tiles", heightTiles);
 
 		var xhr = new js.html.XMLHttpRequest();
 		xhr.open("POST", SERVER + "/generate");
@@ -317,6 +233,51 @@ class GldtkSidebar {
 			'<span class="g-ok">&#x2713; Saved — reloading…</span>'
 		);
 		setStatus("reloading…");
-		haxe.Timer.delay( ()-> App.ME.loadProject(writtenPath), 400 );
+		haxe.Timer.delay( ()-> reloadGeneratedProject(writtenPath), 400 );
+	}
+
+	function reloadGeneratedProject(path:String) {
+		var done = false;
+		var fallbackUsed = false;
+
+		var fallback = function(reason:String) {
+			if( fallbackUsed ) return;
+			fallbackUsed = true;
+			appendMsg("err", 'Reload failed ($reason). Refreshing window…');
+			setStatus("refreshing…");
+			js.Browser.window.location.reload();
+		};
+
+		// If project reload gets stuck in loading, force a hard refresh.
+		haxe.Timer.delay( ()-> {
+			if( !done ) fallback("timeout");
+		}, 3000 );
+
+		try {
+			App.ME.loadProject(path, null, (p)-> {
+				done = true;
+				if( p == null )
+					fallback("project load error");
+				else {
+					// Success: fit camera on the first level
+					try {
+						var editor = page.Editor.ME;
+						if( editor != null && editor.curLevel != null ) {
+							editor.selectLevel(editor.curLevel, true);  // fitView=true
+							editor.camera.fit(true);
+							editor.updateTitle();
+							setStatus("ready");
+						}
+					}
+					catch(err:Dynamic) {
+						fallback("camera fit error: " + Std.string(err));
+					}
+				}
+			});
+		}
+		catch(err:Dynamic) {
+			done = true;
+			fallback(Std.string(err));
+		}
 	}
 }
