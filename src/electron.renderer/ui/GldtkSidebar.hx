@@ -2,6 +2,8 @@ package ui;
 
 typedef ProfileField = { path:String, label:String, ?bool:Bool }
 typedef ProfileGroup = { title:String, ?toggle:String, fields:Array<ProfileField> }
+typedef EditMode = { id:String, label:String, action:String }
+typedef GldtkRect = tool.GldtkAreaTool.GldtkRect
 
 /**
   GLDtk sidebar — persistent right-hand panel, styled to match LDtk's
@@ -17,9 +19,23 @@ class GldtkSidebar {
 	static inline var PROVIDER_KEY = "gldtk_provider";
 	static inline var MODEL_KEY    = "gldtk_model";
 	static inline var PROFILE_KEY  = "gldtk_profile_open";
+	static inline var EDIT_KEY     = "gldtk_edit_open";
+	static inline var MODE_KEY     = "gldtk_edit_mode";
+
+	// Overlay colours on the level canvas
+	static inline var AREA_COLOR    = 0xffcc00;
+	static inline var SECTION_COLOR = 0x4fb8ff;
+	static inline var LOCATE_COLOR  = 0xe34d00;
 
 	static var PROVIDERS = ["gemini", "anthropic", "ollama", "openai", "deepseek"];
 	static var STATUSES  = ["satisfied", "approximated", "impossible", "missing", "unchecked"];
+
+	static var EDIT_MODES : Array<EditMode> = [
+		{ id: "region",   label: "Region",   action: "Regenerate area" },
+		{ id: "section",  label: "Section",  action: "Regenerate section" },
+		{ id: "entities", label: "Entities", action: "Edit entities" },
+		{ id: "describe", label: "Describe", action: "Find location" },
+	];
 
 	// Game Profile fields shown in the panel (paths into GET /profile)
 	static var PROFILE_GROUPS : Array<ProfileGroup> = [
@@ -56,12 +72,33 @@ class GldtkSidebar {
 	var jProfNote  : J;
 	var jProf      : J;
 	var jProfErr   : J;
+	var jEditHead  : J;
+	var jEditNote  : J;
+	var jEdit      : J;
+	var jAreaBtn   : J;
+	var jTarget    : J;
+	var jSection   : J;
+	var jLocText   : J;
+	var jLocated   : J;
+	var jEditPrompt: J;
+	var jEditBtn   : J;
+	var jUndo      : J;
 	var collapsed  : Bool   = false;
 	var busy       : Bool   = false;
 
 	var defaultModels : Map<String,String> = new Map();
 	var profile       : Null<Dynamic>;   // last profile loaded from or saved to the server
 	var profilePath   : Null<String>;    // project the profile belongs to
+
+	// Regional editing (Part 8)
+	var editMode    : String = "region";
+	var area        : Null<GldtkRect>;   // rectangle drawn with "Select area"
+	var dragArea    : Null<GldtkRect>;   // rectangle being dragged
+	var located     : Null<{ rect:GldtkRect, explanation:String }>; // Describe result awaiting confirmation
+	var sections    : Array<Dynamic> = []; // parsed gldtk_sections of the current level
+	var snapshots   : Array<Dynamic> = []; // GET /history, newest first
+	var editPath    : Null<String>;      // project the selection belongs to
+	var overlay     : Null<h2d.Graphics>;
 
 	public function new() {
 		injectCss();
@@ -87,9 +124,8 @@ class GldtkSidebar {
 		new J("body").append(jToggle);
 
 		var providerOpts = PROVIDERS.map( p->'<option value="$p">$p</option>' ).join("");
+		var modeBtns = EDIT_MODES.map( m->'<button class="g-mode-btn" data-mode="${m.id}">${m.label}</button>' ).join("");
 
-		// Part 8 adds the regional editing controls (section dropdown, rectangle
-		// selection, undo) to #g-edit.
 		jRoot = new J('<div id="gldtk-root"></div>');
 		jRoot.html('
 			<div class="g-titlebar">
@@ -116,7 +152,34 @@ class GldtkSidebar {
 					<button class="g-prof-save" id="g-prof-save">Save profile</button>
 				</div>
 
-				<div class="g-edit" id="g-edit"></div>
+				<div class="g-fold-head" id="g-edit-head">
+					<span class="g-caret"></span>EDIT
+					<span class="g-hint" id="g-edit-note"></span>
+				</div>
+				<div class="g-edit" id="g-edit">
+					<div class="g-field g-mode-row">$modeBtns</div>
+					<div class="g-field g-area-row" data-modes="region entities">
+						<button id="g-area-btn" class="g-small-btn" title="Drag a rectangle on the level (Esc to cancel)">Select area</button>
+						<span class="g-target" id="g-target"></span>
+						<button id="g-area-clear" class="g-x" title="Clear the area">&times;</button>
+					</div>
+					<div class="g-field" data-modes="section">
+						<select id="g-section"></select>
+					</div>
+					<div class="g-field" data-modes="describe">
+						<input id="g-loc" type="text" placeholder="Where? eg. the gap before the boss"/>
+					</div>
+					<div class="g-located" id="g-located"></div>
+					<div class="g-field">
+						<textarea id="g-edit-prompt" rows="2" placeholder="What should be there…"></textarea>
+					</div>
+					<div class="g-field">
+						<button id="g-edit-btn" class="g-edit-btn"></button>
+					</div>
+					<div class="g-field">
+						<button id="g-undo" class="g-undo-btn" disabled>&#x21B6; Undo last GLDtk edit</button>
+					</div>
+				</div>
 
 				<div class="g-section">PROVIDER</div>
 				<div class="g-field g-provider-row">
@@ -167,6 +230,35 @@ class GldtkSidebar {
 		jProfHead.click( _-> setProfileOpen( !jProfHead.hasClass("open") ) );
 		jRoot.find("#g-prof-save").click( _-> saveProfile() );
 		jProf.find("input[type=checkbox]").change( _-> updateAbilityToggles() );
+
+		jEditHead   = jRoot.find("#g-edit-head");
+		jEditNote   = jRoot.find("#g-edit-note");
+		jEdit       = jRoot.find("#g-edit");
+		jAreaBtn    = jRoot.find("#g-area-btn");
+		jTarget     = jRoot.find("#g-target");
+		jSection    = jRoot.find("#g-section");
+		jLocText    = jRoot.find("#g-loc");
+		jLocated    = jRoot.find("#g-located");
+		jEditPrompt = jRoot.find("#g-edit-prompt");
+		jEditBtn    = jRoot.find("#g-edit-btn");
+		jUndo       = jRoot.find("#g-undo");
+
+		jEditHead.click( _-> setEditOpen( !jEditHead.hasClass("open") ) );
+		jEdit.find(".g-mode-btn").click( (ev:js.jquery.Event)-> setEditMode( new J(ev.currentTarget).attr("data-mode") ) );
+		jEdit.on("mouseenter", _-> refreshTarget() ); // the entity selection has no change event
+		jAreaBtn.click( _-> startAreaSelection() );
+		jRoot.find("#g-area-clear").click( _-> { area = null; refreshTarget(); drawOverlay(); } );
+		jSection.change( _-> { refreshTarget(); drawOverlay(); bleepRect(selectedSectionRect(), SECTION_COLOR); } );
+		jEditBtn.click( _-> if( !busy ) applyEdit() );
+		jUndo.click( _-> if( !busy ) undo() );
+		jEditPrompt.on("keydown", function(ev:js.jquery.Event) {
+			var ke : js.html.KeyboardEvent = cast Reflect.field(ev, "originalEvent");
+			if( ke != null && ke.key == "Enter" && (ke.ctrlKey || ke.metaKey) && !busy ) applyEdit();
+		});
+		jLocText.on("keydown", function(ev:js.jquery.Event) {
+			var ke : js.html.KeyboardEvent = cast Reflect.field(ev, "originalEvent");
+			if( ke != null && ke.key == "Enter" && !busy ) locate();
+		});
 	}
 
 	function profileFormHtml() : String {
@@ -219,6 +311,7 @@ class GldtkSidebar {
 	function onEditorEvent(e:GlobalEvent) {
 		switch e {
 			case ProjectSelected, ProjectSaved: onProjectChanged();
+			case LevelSelected(_): refreshSections(); drawOverlay();
 			case _:
 		}
 	}
@@ -227,6 +320,7 @@ class GldtkSidebar {
 		refreshFileRow();
 		if( currentProjectPath() != profilePath || profile == null )
 			loadProfile();
+		refreshEdit();
 	}
 
 	function refreshFileRow() {
@@ -254,6 +348,9 @@ class GldtkSidebar {
 		var model = loadStr(MODEL_KEY);
 		if( model != null ) jModel.val(model);
 		setProfileOpen( loadStr(PROFILE_KEY) == "1" );
+		var mode = loadStr(MODE_KEY);
+		setEditMode( mode != null && EDIT_MODES.filter( m->m.id == mode ).length > 0 ? mode : EDIT_MODES[0].id );
+		setEditOpen( loadStr(EDIT_KEY) != "0" );
 		refreshFileRow();
 	}
 
@@ -327,10 +424,18 @@ class GldtkSidebar {
 		persistHistory();
 	}
 
-	function setBusy(b:Bool) {
+	/** `editing`: the edit panel started the request (its button shows the progress). **/
+	function setBusy(b:Bool, editing=false) {
 		busy = b;
 		jBtn.prop("disabled", b);
-		jBtn.html( b ? "Generating…" : "&#x25B6;&nbsp; Generate" );
+		jBtn.html( b && !editing ? "Generating…" : "&#x25B6;&nbsp; Generate" );
+		jEditBtn.prop("disabled", b);
+		jLocated.find("button").prop("disabled", b);
+		if( b && editing )
+			jEditBtn.text("Working…");
+		else
+			refreshEditButton();
+		refreshUndo();
 	}
 
 	// ── Game Profile ──────────────────────────────────────────────────────
@@ -469,6 +574,513 @@ class GldtkSidebar {
 		jProfErr.html( general.map( m->'<div>${esc(m)}</div>' ).join("") );
 	}
 
+	// ── Edit (regional editing + undo) ────────────────────────────────────
+
+	function setEditOpen(open:Bool) {
+		jEditHead.toggleClass("open", open);
+		jEdit.toggle(open);
+		saveStr(EDIT_KEY, open ? "1" : "0");
+		if( !open && activeEditor() != null )
+			activeEditor().clearSpecialTool();
+		drawOverlay();
+	}
+
+	function setEditMode(mode:String) {
+		editMode = mode;
+		saveStr(MODE_KEY, mode);
+		jEdit.find(".g-mode-btn").each( (_, el)-> {
+			var jBtn = new J(el);
+			jBtn.toggleClass("active", jBtn.attr("data-mode") == mode);
+		});
+		jEdit.find("[data-modes]").each( (_, el)-> {
+			var jEl = new J(el);
+			jEl.toggle( jEl.attr("data-modes").split(" ").contains(mode) );
+		});
+		if( mode != "describe" )
+			located = null;
+		refreshLocated();
+		refreshTarget();
+		refreshEditButton();
+		drawOverlay();
+	}
+
+	/** Re-reads the level after a project change, reload or save. **/
+	function refreshEdit() {
+		var path = currentProjectPath();
+		if( path != editPath ) {
+			// Another project: its selection doesn't apply anymore
+			editPath = path;
+			area = null;
+			located = null;
+			snapshots = [];
+			refreshLocated();
+		}
+		refreshSections();
+		refreshTarget();
+		refreshHistory();
+		drawOverlay();
+	}
+
+	function refreshEditButton() {
+		var m = EDIT_MODES.filter( m->m.id == editMode )[0];
+		jEditBtn.text( m != null ? m.action : "Apply" );
+		jEditBtn.toggle( located == null );
+		jEditPrompt.attr("placeholder", editMode == "entities"
+			? "What should change? eg. make the bats stronger"
+			: "What should be there? eg. a spike pit with two floating platforms");
+	}
+
+	/** Grid used for tile coordinates: the IntGrid layer, as in the exported level. **/
+	function gridLayer() : Null<data.inst.LayerInstance> {
+		var editor = activeEditor();
+		if( editor == null || editor.curLevel == null ) return null;
+		for( li in editor.curLevel.layerInstances )
+			if( li.def.type == IntGrid )
+				return li;
+		return editor.curLayerInstance;
+	}
+
+	static function rectStr(r:GldtkRect) : String {
+		return '${r.w}×${r.h} at (${r.col}, ${r.row})';
+	}
+
+	// Sections
+
+	function refreshSections() {
+		var prev = jSection.val();
+		sections = [];
+		var editor = activeEditor();
+		if( editor != null && editor.curLevel != null )
+			for( fi in editor.curLevel.fieldInstances )
+				if( fi.def.identifier == "gldtk_sections" && !fi.valueIsNull(0) ) {
+					try {
+						var arr : Array<Dynamic> = haxe.Json.parse( fi.getString(0) );
+						if( Std.isOfType(arr, Array) ) sections = arr;
+					}
+					catch(_) {}
+				}
+
+		if( sections.length == 0 )
+			jSection.html('<option value="">No GLDtk sections in this level</option>');
+		else
+			jSection.html( sections.map( s->'<option value="${esc(s.id)}">${esc(s.name != null ? s.name : s.id)}' +
+				( s.difficulty != null ? ' · ${esc(s.difficulty)}' : "" ) + '</option>' ).join("") );
+		if( prev != null && sections.filter( s->s.id == prev ).length > 0 )
+			jSection.val(prev);
+		jSection.prop("disabled", sections.length == 0);
+	}
+
+	function selectedSection() : Null<Dynamic> {
+		var id = jSection.val();
+		for( s in sections )
+			if( s.id == id ) return s;
+		return null;
+	}
+
+	/** The section's band; old files only store the columns of horizontal sections. **/
+	function selectedSectionRect() : Null<GldtkRect> {
+		var s = selectedSection();
+		var li = gridLayer();
+		if( s == null || li == null ) return null;
+		var c0 : Int = s.col_start != null ? s.col_start : 0;
+		var c1 : Int = s.col_end   != null ? s.col_end   : li.cWid-1;
+		var r0 : Int = s.row_start != null ? s.row_start : 0;
+		var r1 : Int = s.row_end   != null ? s.row_end   : li.cHei-1;
+		return { col: c0, row: r0, w: c1-c0+1, h: r1-r0+1 };
+	}
+
+	// Area selection and entity target
+
+	function startAreaSelection() {
+		var editor = activeEditor();
+		var li = gridLayer();
+		if( editor == null || li == null ) {
+			jEditNote.text("open a level first");
+			return;
+		}
+		if( editor.isSpecialToolActive(tool.GldtkAreaTool) ) {
+			editor.clearSpecialTool(); // second click cancels
+			return;
+		}
+		var t = new tool.GldtkAreaTool(li);
+		t.onChange = r-> { dragArea = r; drawOverlay(); };
+		t.onSelect = r-> { area = r; dragArea = null; refreshTarget(); drawOverlay(); };
+		t.onEnd = ()-> { dragArea = null; jAreaBtn.removeClass("active"); drawOverlay(); };
+		editor.setSpecialTool(t);
+		jAreaBtn.addClass("active");
+		jEditNote.text("drag on the level");
+	}
+
+	/** iids of the entities currently selected in LDtk. **/
+	function selectedEntityIids() : Array<String> {
+		var editor = activeEditor();
+		if( editor == null ) return [];
+		var iids = [];
+		for( e in @:privateAccess editor.selectionTool.group.allElements() )
+			if( e != null )
+				switch e {
+					case Entity(_, ei): iids.push(ei.iid);
+					case _:
+				}
+		return iids;
+	}
+
+	function refreshTarget() {
+		var text = switch editMode {
+			case "entities":
+				var n = selectedEntityIids().length;
+				n > 0 ? '$n selected entit${n > 1 ? "ies" : "y"}' : area != null ? "area " + rectStr(area) : "whole level";
+			case _:
+				area != null ? rectStr(area) : "no area selected";
+		}
+		jTarget.text(text);
+		jTarget.toggleClass("g-none", editMode == "region" && area == null);
+		jEditNote.text( switch editMode {
+			case "section": var r = selectedSectionRect(); r != null ? rectStr(r) : "";
+			case _: "";
+		});
+	}
+
+	// Canvas overlay
+
+	/** Overlay graphics in the level render (level pixel coords), recreated with the Editor. **/
+	function getOverlay() : Null<h2d.Graphics> {
+		var editor = activeEditor();
+		if( editor == null || editor.levelRender == null || editor.levelRender.root == null ) return null;
+		var root = editor.levelRender.root;
+		if( overlay == null || overlay.parent != root ) {
+			if( overlay != null ) overlay.remove();
+			overlay = new h2d.Graphics();
+			root.add(overlay, Const.DP_TOP);
+		}
+		return overlay;
+	}
+
+	function drawOverlay() {
+		var g = getOverlay();
+		if( g == null ) return;
+		g.clear();
+		var li = gridLayer();
+		if( li == null || !jEditHead.hasClass("open") ) return;
+
+		var gs = li.def.gridSize;
+		function draw(r:Null<GldtkRect>, col:UInt) {
+			if( r == null ) return;
+			g.lineStyle(2, col, 0.9);
+			g.beginFill(col, 0.18);
+			g.drawRect(r.col*gs, r.row*gs, r.w*gs, r.h*gs);
+			g.endFill();
+		}
+		switch editMode {
+			case "region", "entities": draw( dragArea != null ? dragArea : area, AREA_COLOR );
+			case "section": draw( selectedSectionRect(), SECTION_COLOR );
+			case "describe": draw( located != null ? located.rect : null, LOCATE_COLOR );
+			case _:
+		}
+		App.ME.requestCpu();
+	}
+
+	function bleepRect(r:Null<GldtkRect>, col:UInt) {
+		var editor = activeEditor();
+		var li = gridLayer();
+		if( r == null || editor == null || li == null ) return;
+		var gs = li.def.gridSize;
+		editor.levelRender.bleepLevelRectPx(r.col*gs, r.row*gs, r.w*gs, r.h*gs, col, 2);
+	}
+
+	// Requests
+
+	function editBase(path:String) : Dynamic {
+		var payload : Dynamic = {
+			path:     path,
+			provider: jProvider.val(),
+			seed:     Std.int( Math.random() * 100000 ),
+		};
+		var model = StringTools.trim( jModel.val() );
+		if( model.length > 0 )
+			Reflect.setField(payload, "model", model);
+		return payload;
+	}
+
+	/** Path for an edit, or null (with a message) when no project is open. **/
+	function editTargetPath() : Null<String> {
+		var path = currentProjectPath();
+		refreshFileRow();
+		if( path == null )
+			appendMsg("err", "Open a .ldtk project in LDtk first.");
+		return path;
+	}
+
+	/** Edits read the file on disk (it is the source of truth), so unsaved hand edits are saved first. **/
+	function saveFirst(then:Void->Void) {
+		var editor = activeEditor();
+		if( editor == null || !editor.needSaving ) {
+			then();
+			return;
+		}
+		setStatus("saving…");
+		editor.onSave(false, null, ()-> {
+			if( editor.needSaving ) {
+				appendMsg("err", "Save your changes in LDtk first: the edit works on the saved file.");
+				setStatus("error");
+			}
+			else
+				then();
+		});
+	}
+
+	function editPrompt() : Null<String> {
+		var prompt = StringTools.trim( jEditPrompt.val() );
+		if( prompt.length == 0 ) {
+			jEditNote.text("describe the change first");
+			jEditPrompt.focus();
+			return null;
+		}
+		return prompt;
+	}
+
+	function applyEdit() {
+		if( editMode == "describe" ) {
+			locate();
+			return;
+		}
+		var prompt = editPrompt();
+		if( prompt == null ) return;
+		var path = editTargetPath();
+		if( path == null ) return;
+
+		var payload = editBase(path);
+		payload.prompt = prompt;
+		switch editMode {
+			case "region":
+				if( area == null ) {
+					jEditNote.text("select an area first");
+					return;
+				}
+				payload.rect = area;
+				postEdit("/edit/region", payload, 'Region ${rectStr(area)}', prompt);
+
+			case "section":
+				var s = selectedSection();
+				if( s == null ) {
+					jEditNote.text("no section to edit");
+					return;
+				}
+				payload.section_id = s.id;
+				postEdit("/edit/section", payload, 'Section ${s.name != null ? s.name : s.id}', prompt);
+
+			case "entities":
+				var iids = selectedEntityIids();
+				var target : String;
+				if( iids.length > 0 ) {
+					payload.entity_iids = iids;
+					target = '${iids.length} selected';
+				}
+				else if( area != null ) {
+					payload.rect = area;
+					target = rectStr(area);
+				}
+				else
+					target = "whole level";
+				postEdit("/edit/entities", payload, 'Entities · $target', prompt);
+
+			case _:
+		}
+	}
+
+	function postEdit(route:String, payload:Dynamic, label:String, prompt:String, ?onDone:Void->Void) {
+		appendMsg("user", '<span class="g-meta">&#x270E; ${esc(label)}</span>${esc(prompt)}');
+		saveFirst( ()-> sendEdit(route, payload, label, onDone) );
+	}
+
+	function sendEdit(route:String, payload:Dynamic, label:String, ?onDone:Void->Void) {
+		setBusy(true, true);
+		setStatus("editing…");
+		var path : String = payload.path;
+		request("POST", route, payload, (status, res)-> {
+			setBusy(false);
+			if( status != 200 || res == null || res.success == false ) {
+				appendMsg("err", esc(errorText(status, res)) + '<span class="g-meta g-unchanged">The level was not changed.</span>');
+				setStatus("error");
+				return;
+			}
+			if( onDone != null ) onDone();
+			var e : Dynamic = res.edit;
+			var region : Dynamic = e != null ? e.region : null;
+			var header = '<span class="g-meta g-edit-meta">&#x270E; ${esc(label)}' +
+				( region != null && region.w != null && label.indexOf(rectStr(region)) < 0 ? ' · ${esc(rectStr(region))}' : "" ) + '</span>';
+			onSuccess(res, path, header);
+		}, ()-> {
+			setBusy(false);
+			appendMsg("err", "Cannot reach GLDtk server — is <code>python server.py</code> running?");
+			setStatus("offline");
+		});
+	}
+
+	/** Error message from a failed response: `error`, FastAPI's `detail`, or the HTTP status. **/
+	static function errorText(status:Int, res:Dynamic) : String {
+		if( res == null )
+			return status == 200 ? "Parse error — invalid JSON from server." : 'Server returned HTTP $status.';
+		if( res.error != null )
+			return Std.string(res.error);
+		var detail : Dynamic = res.detail;
+		if( Std.isOfType(detail, Array) ) {
+			var errors : Array<Dynamic> = detail;
+			return errors.map( e->e.msg != null ? Std.string(e.msg) : Std.string(e) ).join("; ");
+		}
+		if( detail != null )
+			return Std.string(detail);
+		return status == 200 ? "Unknown error" : 'Server returned HTTP $status.';
+	}
+
+	// Describe: locate, then confirm
+
+	function locate() {
+		var text = StringTools.trim( jLocText.val() );
+		if( text.length == 0 ) {
+			jEditNote.text("describe a location first");
+			jLocText.focus();
+			return;
+		}
+		var path = editTargetPath();
+		if( path == null ) return;
+
+		var payload = editBase(path);
+		Reflect.deleteField(payload, "seed");
+		payload.text = text;
+
+		appendMsg("user", '<span class="g-meta">&#x1F4CD; Locate</span>${esc(text)}');
+		saveFirst( ()-> sendLocate(path, payload) );
+	}
+
+	function sendLocate(path:String, payload:Dynamic) {
+		setBusy(true, true);
+		setStatus("locating…");
+		request("POST", "/edit/locate", payload, (status, res)-> {
+			setBusy(false);
+			var r : Dynamic = res != null ? res.rect : null;
+			if( status != 200 || res == null || res.success == false || r == null || r.w == null ) {
+				appendMsg("err", esc(errorText(status, res)));
+				setStatus("error");
+				return;
+			}
+			if( path != currentProjectPath() ) return;
+			located = {
+				rect: { col: r.col, row: r.row, w: r.w, h: r.h },
+				explanation: res.explanation != null ? res.explanation : "",
+			};
+			appendMsg("ai", '<span class="g-meta">&#x1F4CD; ${esc(rectStr(located.rect))}</span>${esc(located.explanation)}');
+			setStatus("ready");
+			refreshLocated();
+			refreshEditButton();
+			drawOverlay();
+			bleepRect(located.rect, LOCATE_COLOR);
+		}, ()-> {
+			setBusy(false);
+			appendMsg("err", "Cannot reach GLDtk server — is <code>python server.py</code> running?");
+			setStatus("offline");
+		});
+	}
+
+	function refreshLocated() {
+		jLocated.empty();
+		if( located == null ) return;
+		jLocated.html(
+			'<div class="g-located-text"><b>${esc(rectStr(located.rect))}</b> ${esc(located.explanation)}</div>' +
+			'<div class="g-field"><button class="g-loc-apply">Apply here</button><button class="g-loc-cancel gray">Cancel</button></div>'
+		);
+		jLocated.find(".g-loc-apply").click( _-> if( !busy ) applyLocated() );
+		jLocated.find(".g-loc-cancel").click( _-> cancelLocated() );
+	}
+
+	function applyLocated() {
+		if( located == null ) return;
+		var prompt = editPrompt();
+		if( prompt == null ) return;
+		var path = editTargetPath();
+		if( path == null ) return;
+		var payload = editBase(path);
+		payload.rect = located.rect;
+		payload.prompt = prompt;
+		postEdit("/edit/region", payload, 'Region ${rectStr(located.rect)}', prompt, cancelLocated);
+	}
+
+	function cancelLocated() {
+		located = null;
+		refreshLocated();
+		refreshEditButton();
+		drawOverlay();
+	}
+
+	// History and undo
+
+	function refreshHistory() {
+		var path = currentProjectPath();
+		if( path == null ) {
+			snapshots = [];
+			refreshUndo();
+			return;
+		}
+		request("GET", "/history?path=" + StringTools.urlEncode(path), null, (status, res)-> {
+			if( path != currentProjectPath() ) return;
+			var list : Array<Dynamic> = status == 200 && res != null && res.snapshots != null ? res.snapshots : [];
+			// Newest first, whatever order the server uses (timestamps sort as text)
+			list.sort( (a, b)-> Reflect.compare(Std.string(b.timestamp), Std.string(a.timestamp)) );
+			snapshots = list;
+			refreshUndo();
+		}, ()-> {
+			snapshots = [];
+			refreshUndo();
+		});
+	}
+
+	function refreshUndo() {
+		var n = snapshots.length;
+		jUndo.prop("disabled", busy || n == 0);
+		jUndo.html('&#x21B6; Undo last GLDtk edit' + ( n > 0 ? ' <span class="g-count">$n</span>' : "" ));
+		jUndo.attr("title", n > 0
+			? 'Restore the file as it was before: ${snapshots[0].label != null ? snapshots[0].label : snapshots[0].timestamp}'
+			: "No GLDtk snapshot for this file");
+	}
+
+	function undo() {
+		var path = editTargetPath();
+		if( path == null || snapshots.length == 0 ) return;
+		var editor = activeEditor();
+		if( editor != null && editor.needSaving )
+			new ui.modal.dialog.Confirm(null, L.untranslated("Undo restores the file from before the last GLDtk edit. Your unsaved changes will be lost."), true, sendUndo.bind(path));
+		else
+			sendUndo(path);
+	}
+
+	function sendUndo(path:String) {
+		var newest = snapshots[0];
+		setBusy(true, true);
+		setStatus("undoing…");
+		request("POST", "/undo", { path: path }, (status, res)-> {
+			setBusy(false);
+			if( status != 200 || res == null || res.success == false ) {
+				appendMsg("err", esc(errorText(status, res)));
+				setStatus("error");
+				refreshHistory();
+				return;
+			}
+			var label = newest.label != null ? newest.label : newest.timestamp;
+			var remaining : Null<Int> = res.remaining;
+			appendMsg("ai",
+				'<span class="g-meta g-edit-meta">&#x21B6; Undo</span>' +
+				'Restored the file from before: ${esc(label)}' +
+				'<span class="g-ok">&#x2713; ${remaining != null ? remaining + " older snapshot" + (remaining == 1 ? "" : "s") + " left" : "Restored"}</span>'
+			);
+			setStatus("reloading…");
+			haxe.Timer.delay( ()-> reloadGeneratedProject(path), 400 );
+		}, ()-> {
+			setBusy(false);
+			appendMsg("err", "Cannot reach GLDtk server — is <code>python server.py</code> running?");
+			setStatus("offline");
+		});
+	}
+
 	// ── Generate ──────────────────────────────────────────────────────────
 
 	function generate() {
@@ -521,7 +1133,8 @@ class GldtkSidebar {
 		});
 	}
 
-	function onSuccess(res:Dynamic, writtenPath:String) {
+	/** Shows a generate or edit result, then reloads the level in place. `header`: edit summary. **/
+	function onSuccess(res:Dynamic, writtenPath:String, header="") {
 		var s        : Dynamic = res.stats   != null ? res.stats   : {};
 		var themeStr : String  = s.theme     != null ? s.theme     : "";
 		var nodes    : Int     = s.nodes     != null ? s.nodes     : 0;
@@ -545,6 +1158,7 @@ class GldtkSidebar {
 			: "";
 
 		appendMsg("ai",
+			header +
 			'<span class="g-meta">${esc(themeStr)} · $nodes nodes · $edges edges · $verified · ${etParts.join(" ")}</span>' +
 			fidelityHtml(res.fidelity) +
 			warnHtml +

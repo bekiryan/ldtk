@@ -310,7 +310,80 @@
 #gldtk-root .g-prof-err { font-size: 9px; color: #ffa386; }
 #gldtk-root .g-perr { text-align: right; }
 #gldtk-root .g-prof-save { width: 100%; margin: 4px 0 0; padding: 4px; font-size: 10px; }
-#gldtk-root .g-edit:empty { display: none; }
+
+/* ── Edit panel ─────────────────────────────────────────────────────────── */
+#gldtk-root .g-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 2px 2px 6px;
+  border-bottom: 1px solid #2e333f;
+}
+#gldtk-root .g-mode-row { gap: 0; }
+#gldtk-root .g-mode-btn {
+  flex: 1;
+  margin: 0;
+  padding: 4px 2px;
+  font-size: 9px;
+  background: #2e333f;
+  color: #737f9d;
+  border: 1px solid #545d73;
+  box-shadow: none;
+  text-transform: uppercase;
+  letter-spacing: .3px;
+}
+#gldtk-root .g-mode-btn:first-child { border-radius: 3px 0 0 3px; }
+#gldtk-root .g-mode-btn:last-child  { border-radius: 0 3px 3px 0; }
+#gldtk-root .g-mode-btn.active { background: #e34d00; color: #fff; border-color: #e34d00; }
+#gldtk-root .g-mode-btn:hover:not(.active) { background: #3c4455; color: #c1cfeb; }
+#gldtk-root .g-area-row { align-items: center; }
+#gldtk-root .g-small-btn {
+  flex: none;
+  width: auto;
+  margin: 0;
+  padding: 3px 7px;
+  font-size: 10px;
+}
+#gldtk-root .g-small-btn.active { background: #ffcc00; color: #1e2229; }
+#gldtk-root .g-target { flex: 1; font-size: 10px; color: #ffcc00; }
+#gldtk-root .g-target.g-none { color: #545d73; font-style: italic; }
+#gldtk-root .g-x {
+  flex: none;
+  width: auto;
+  margin: 0;
+  padding: 0 5px;
+  font-size: 12px;
+  background: transparent;
+  color: #545d73;
+  border: none;
+  box-shadow: none;
+}
+#gldtk-root .g-x:hover { color: #c1cfeb; }
+#gldtk-root .g-field textarea#g-edit-prompt { height: 40px; }
+#gldtk-root .g-located:empty { display: none; }
+#gldtk-root .g-located {
+  padding: 4px 5px;
+  background: #0d0f14;
+  border-left: 2px solid #e34d00;
+  border-radius: 2px;
+}
+#gldtk-root .g-located-text { font-size: 10px; margin-bottom: 4px; }
+#gldtk-root .g-located-text b { color: #ff8a50; }
+#gldtk-root .g-located button { flex: 1; margin: 0; padding: 4px; font-size: 10px; }
+#gldtk-root .g-located .g-loc-apply { background: #e34d00; color: #fff; }
+#gldtk-root .g-edit-btn { width: 100%; margin: 0; padding: 5px; font-size: 11px; font-weight: 700; }
+#gldtk-root .g-undo-btn { width: 100%; margin: 0; padding: 4px; font-size: 10px; }
+#gldtk-root .g-edit-btn:disabled,
+#gldtk-root .g-undo-btn:disabled { opacity: .4; cursor: not-allowed; }
+#gldtk-root .g-count {
+  padding: 0 4px;
+  border-radius: 6px;
+  background: #545d73;
+  color: #fff;
+  font-size: 9px;
+}
+#gldtk-root .g-meta.g-edit-meta { color: #ffcc00; }
+#gldtk-root .g-meta.g-unchanged { margin: 3px 0 0; color: #ffa386; }
 
 /* ── Provider row ───────────────────────────────────────────────────────── */
 #gldtk-root .g-provider-row select { flex: 0 0 90px; width: 90px; }
