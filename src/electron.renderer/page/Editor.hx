@@ -412,6 +412,13 @@ class Editor extends Page {
 
 
 	public function onProjectImageChanged(relPath:String) {
+		// macOS can report a file written just before the project was (re)loaded, after its watch
+		// started (eg. a GLDtk generate writing a new tileset image): nothing to reload then
+		if( project.isCachedImageUpToDate(relPath) ) {
+			App.LOG.fileOp("Unchanged image ignored: "+relPath);
+			return;
+		}
+
 		if( project.reloadImage(relPath) ) {
 			N.success("Image updated: "+dn.FilePath.extractFileWithExt(relPath));
 
