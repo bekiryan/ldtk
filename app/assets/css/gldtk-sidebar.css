@@ -67,6 +67,19 @@
   font-size: 10px;
   color: #545d73;
 }
+#gldtk-root .g-clear {
+  flex: none;
+  width: auto;
+  margin: 0 0 0 8px;
+  padding: 1px 6px;
+  font-size: 9px;
+  background: transparent;
+  color: #545d73;
+  border: 1px solid #3c4455;
+  box-shadow: none;
+  text-transform: uppercase;
+}
+#gldtk-root .g-clear:hover { color: #c1cfeb; border-color: #737f9d; }
 
 /* ── Chat history ───────────────────────────────────────────────────────── */
 #gldtk-root .g-history,
@@ -124,7 +137,7 @@
   font-size: 10px;
 }
 #gldtk-root pre.g-ascii {
-  margin: 5px 0 0;
+  margin: 3px 0 0;
   padding: 5px;
   background: #0d0f14;
   border-radius: 3px;
@@ -133,6 +146,67 @@
   color: #cfdd40;
   overflow-x: auto;
   white-space: pre;
+}
+
+/* ── Collapsible blocks (preview, warnings) ─────────────────────────────── */
+#gldtk-root .g-history summary { cursor: pointer; }
+#gldtk-root details.g-fold { margin-top: 5px; }
+#gldtk-root details.g-fold > summary {
+  font-size: 9px;
+  color: #737f9d;
+  text-transform: uppercase;
+  letter-spacing: .3px;
+}
+#gldtk-root .g-warn-list {
+  margin: 3px 0 0;
+  padding-left: 14px;
+  font-size: 10px;
+  color: #ffcc00;
+}
+
+/* ── Fidelity report ────────────────────────────────────────────────────── */
+#gldtk-root .g-fid {
+  margin-top: 4px;
+  padding: 5px;
+  background: #0d0f14;
+  border-radius: 3px;
+}
+#gldtk-root .g-fid-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  margin-bottom: 3px;
+}
+#gldtk-root .g-fid-score { font-weight: 700; font-size: 12px; color: #ffcc00; }
+#gldtk-root .g-fid-counts { font-size: 9px; color: #737f9d; }
+#gldtk-root .g-req > summary {
+  list-style: none;
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  padding: 1px 0;
+  font-size: 10px;
+}
+#gldtk-root .g-req > summary::-webkit-details-marker { display: none; }
+#gldtk-root .g-req-icon { flex-shrink: 0; width: 14px; text-align: center; font-size: 9px; }
+#gldtk-root .g-req-text { flex: 1; }
+#gldtk-root .g-req-impossible .g-req-text,
+#gldtk-root .g-req-missing .g-req-text { color: #ffa386; }
+#gldtk-root .g-req-unchecked .g-req-text { color: #737f9d; }
+#gldtk-root .g-req-reason {
+  margin: 0 0 3px 18px;
+  font-size: 9px;
+  color: #737f9d;
+}
+#gldtk-root .g-tag {
+  flex-shrink: 0;
+  padding: 0 3px;
+  border-radius: 2px;
+  background: #3c4455;
+  color: #c1cfeb;
+  font-size: 8px;
+  text-transform: uppercase;
 }
 
 /* ── Current file indicator ─────────────────────────────────────────────── */
@@ -191,6 +265,55 @@
   font-size: 11px;
 }
 #gldtk-root .g-field textarea { height: 62px; }
+
+/* ── Game Profile panel ─────────────────────────────────────────────────── */
+#gldtk-root .g-fold-head {
+  font-size: 9px;
+  font-weight: 700;
+  color: #545d73;
+  letter-spacing: .6px;
+  padding: 6px 2px 2px;
+  cursor: pointer;
+}
+#gldtk-root .g-fold-head:hover { color: #c1cfeb; }
+#gldtk-root .g-caret::before { content: "\25B8"; display: inline-block; width: 10px; }
+#gldtk-root .g-fold-head.open .g-caret::before { content: "\25BE"; }
+#gldtk-root .g-prof {
+  padding: 2px 2px 4px;
+  border-bottom: 1px solid #2e333f;
+}
+#gldtk-root .g-off { opacity: .4; }
+#gldtk-root .g-prof.g-off { pointer-events: none; }
+#gldtk-root .g-pgroup { margin-bottom: 4px; }
+#gldtk-root .g-ptitle,
+#gldtk-root .g-ptoggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: #c1cfeb;
+  padding: 2px 0;
+}
+#gldtk-root .g-pparams { padding-left: 14px; }
+#gldtk-root .g-prow {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 10px;
+  color: #737f9d;
+  padding: 1px 0;
+}
+#gldtk-root .g-prow span { flex: 1; }
+#gldtk-root .g-prow input[type=number] { width: 70px; font-size: 10px; }
+#gldtk-root input.g-invalid { border-color: #e34d00; outline: 1px solid #e34d00; }
+#gldtk-root .g-perr,
+#gldtk-root .g-prof-err { font-size: 9px; color: #ffa386; }
+#gldtk-root .g-perr { text-align: right; }
+#gldtk-root .g-prof-save { width: 100%; margin: 4px 0 0; padding: 4px; font-size: 10px; }
+#gldtk-root .g-edit:empty { display: none; }
+
+/* ── Provider row ───────────────────────────────────────────────────────── */
+#gldtk-root .g-provider-row select { flex: 0 0 90px; width: 90px; }
 
 /* ── Difficulty row ─────────────────────────────────────────────────────── */
 #gldtk-root .g-diff-row { gap: 0; }
