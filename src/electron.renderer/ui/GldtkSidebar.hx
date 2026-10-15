@@ -127,6 +127,16 @@ class GldtkSidebar {
 	var difficultyTimer   : Null<haxe.Timer>;
 	var difficultyFromResponse = false;
 
+	// Multi-level worlds (v3 Part 17b)
+	var levelInfo         : Map<String,Dynamic> = new Map(); // level iid -> { title, score, verified } of `levelInfoPath`
+	var levelInfoPath     : Null<String>;
+	var fullReload        = false;             // the next reload brings new levels
+	var reselectIid       : Null<String>;      // level to select again once the project is reloaded
+	var jLevels           : J;                 // "Levels" select next to Generate
+	var jLevelBox         : J;
+	var jLevelList        : J;
+	var jLevelEditing     : J;
+
 	// Live progress + Cancel (v3 Part 14)
 	var job : Null<GldtkJob>;                  // the running generate / edit / locate
 
@@ -182,6 +192,12 @@ class GldtkSidebar {
 
 				<div class="g-file-row" id="g-file-row">
 					<span class="g-file-label">No project open</span>
+				</div>
+
+				<div class="g-levels" id="g-level-box">
+					<div class="g-levels-editing" id="g-level-editing"></div>
+					<div class="g-level-list" id="g-level-list"></div>
+					<button id="g-regen" class="g-small-btn" title="Generate this level again with its own prompt; the other levels and the links stay">&#x21BB; Regenerate this level</button>
 				</div>
 
 				<div class="g-play-row">
@@ -248,7 +264,11 @@ class GldtkSidebar {
 					          placeholder="Describe the level… (Ctrl+Enter to generate)"></textarea>
 				</div>
 
-				<div class="g-field">
+				<div class="g-field g-gen-row">
+					<select id="g-levels" title="Number of levels: Auto lets the prompt decide">
+						<option value="">Levels: Auto</option>
+						${[1,2,3,4,5,6,7,8].map( n->'<option value="$n">Levels: $n</option>' ).join("")}
+					</select>
 					<button id="g-btn" class="g-gen-btn">&#x25B6;&nbsp; Generate</button>
 				</div>
 
@@ -272,6 +292,19 @@ class GldtkSidebar {
 		jProgMsg  = jRoot.find("#g-prog-msg");
 		jProgTime = jRoot.find("#g-prog-time");
 		jProgLog  = jRoot.find("#g-prog-log");
+
+		jLevels      = jRoot.find("#g-levels");
+		jLevelBox    = jRoot.find("#g-level-box");
+		jLevelList   = jRoot.find("#g-level-list");
+		jLevelEditing = jRoot.find("#g-level-editing");
+		jLevelList.on("click", ".g-lv", function(ev:js.jquery.Event) {
+			var editor = activeEditor();
+			if( editor == null || busy ) return;
+			var iid = new J(ev.currentTarget).attr("data-iid");
+			for( l in editor.curWorld.levels )
+				if( l.iid == iid ) { editor.selectLevel(l, true); break; }
+		});
+		jRoot.find("#g-regen").click( _-> if( !busy ) regenerateLevel() );
 
 		jBtn.click( _-> if( job != null ) cancelJob() else if( !busy ) generate() );
 		jRoot.find("#g-clear").click( _-> clearHistory() );
@@ -394,6 +427,7 @@ class GldtkSidebar {
 		switch e {
 			case ProjectSelected:
 				onProjectChanged();
+				refreshLevels();
 				if( routeFromResponse && samePath(routePath, currentProjectPath()) ) {
 					routeFromResponse = false; // reload after a generate / edit / undo: its route is current
 					drawRoute();
@@ -415,6 +449,7 @@ class GldtkSidebar {
 				scheduleDifficultyFetch();
 
 			case LevelSelected(l):
+				refreshLevels();
 				refreshSections();
 				drawOverlay();
 				if( route != null && route.level_iid == l.iid )
@@ -933,6 +968,9 @@ class GldtkSidebar {
 		var model = StringTools.trim( jModel.val() );
 		if( model.length > 0 )
 			Reflect.setField(payload, "model", model);
+		var lv = curLevelIid();
+		if( lv != null )
+			payload.level = lv;
 		return payload;
 	}
 
@@ -1206,7 +1244,10 @@ class GldtkSidebar {
 		var newest = snapshots[0];
 		setBusy(true, true);
 		setStatus("undoing…");
-		request("POST", "/undo", { path: path }, (status, res)-> {
+		var undoBody : Dynamic = { path: path };
+		var lv = curLevelIid();
+		if( lv != null ) undoBody.level = lv;
+		request("POST", "/undo", undoBody, (status, res)-> {
 			setBusy(false);
 			if( status != 200 || res == null || res.success == false ) {
 				appendMsg("err", esc(errorText(status, res)));
@@ -1214,6 +1255,7 @@ class GldtkSidebar {
 				refreshHistory();
 				return;
 			}
+			takeLevels(res, path);
 			takeRoute(res.route, path);
 			takeDifficulty(res.difficulty, path);
 			var label = newest.label != null ? newest.label : newest.timestamp;
@@ -1294,11 +1336,12 @@ class GldtkSidebar {
 			jRouteSum.removeClass("g-route-bad").text("Route: server offline");
 		}
 		if( editor.needSaving ) {
-			var body = '{"path":${haxe.Json.stringify(path)},"project":${dn.data.JsonPretty.stringify(editor.project.toJson(), Minified)}}';
+			var lv = curLevelIid();
+			var body = '{"path":${haxe.Json.stringify(path)},' + ( lv != null ? '"level":${haxe.Json.stringify(lv)},' : "" ) + '"project":${dn.data.JsonPretty.stringify(editor.project.toJson(), Minified)}}';
 			request("POST", "/route", body, onDone, onOffline);
 		}
 		else
-			request("GET", "/route?path=" + StringTools.urlEncode(path), null, onDone, onOffline);
+			request("GET", "/route?path=" + StringTools.urlEncode(path) + levelQuery(), null, onDone, onOffline);
 	}
 
 	function refreshRouteSummary() {
@@ -1394,7 +1437,7 @@ class GldtkSidebar {
 		var path = currentProjectPath();
 		if( path == null ) return;
 		var seq = ++difficultySeq;
-		request("GET", "/difficulty?path=" + StringTools.urlEncode(path), null, (status, res)-> {
+		request("GET", "/difficulty?path=" + StringTools.urlEncode(path) + levelQuery(), null, (status, res)-> {
 			if( seq != difficultySeq || !samePath(path, currentProjectPath()) ) return;
 			setDifficulty( status == 200 && res != null ? res : { success: false, error: errorText(status, res) }, path );
 		}, ()-> {
@@ -1532,11 +1575,112 @@ class GldtkSidebar {
 		appendMsg("ai", "It finished before the cancel arrived, so the result was kept.");
 	}
 
+	// ── Multi-level worlds (v3 Part 17b) ──────────────────────────────────
+
+	function curLevelIid() : Null<String> {
+		var editor = activeEditor();
+		return editor != null && editor.curLevel != null ? editor.curLevel.iid : null;
+	}
+
+	function levelQuery() : String {
+		var lv = curLevelIid();
+		return lv == null ? "" : "&level=" + StringTools.urlEncode(lv);
+	}
+
+	function levelLabel(iid:String) : String {
+		var editor = activeEditor();
+		if( editor != null )
+			for( l in editor.curWorld.levels )
+				if( l.iid == iid ) return l.identifier;
+		return iid;
+	}
+
+	/** Keeps the level titles and scores of a generate / edit / undo response; edits send null scores for the levels they skipped. **/
+	function takeLevels(res:Dynamic, path:String) {
+		var lvs : Array<Dynamic> = res.levels;
+		if( lvs == null || lvs.length == 0 ) return;
+		if( res.world != null ) fullReload = true;
+		if( levelInfoPath == null || !samePath(levelInfoPath, path) || res.world != null ) {
+			levelInfo = new Map();
+			levelInfoPath = path;
+		}
+		for( l in lvs ) {
+			if( l.iid == null ) continue;
+			var info : Dynamic = levelInfo.exists(l.iid) ? levelInfo.get(l.iid) : {};
+			if( l.title != null ) info.title = l.title;
+			if( l.score != null ) info.score = l.score;
+			if( l.verified != null ) info.verified = l.verified;
+			levelInfo.set(l.iid, info);
+			if( l.current == true && lvs.length > 1 ) reselectIid = l.iid;
+		}
+		refreshLevels();
+	}
+
+	/** After a reload LDtk shows the first level: go back to the one the response was about. **/
+	function reselectLevel() {
+		var iid = reselectIid;
+		reselectIid = null;
+		var editor = activeEditor();
+		if( iid == null || editor == null ) return;
+		for( l in editor.curWorld.levels )
+			if( l.iid == iid ) {
+				if( editor.curLevel != l ) editor.selectLevel(l, true);
+				return;
+			}
+	}
+
+	function refreshLevels() {
+		var editor = activeEditor();
+		var lvs = editor != null && editor.curWorld != null ? editor.curWorld.levels : [];
+		if( lvs.length < 2 ) {
+			jLevelBox.removeClass("open");
+			jLevelList.empty();
+			return;
+		}
+		jLevelBox.addClass("open");
+		var cur = curLevelIid();
+		var known = samePath(levelInfoPath, currentProjectPath());
+		var rows = new StringBuf();
+		for( l in lvs ) {
+			var info : Dynamic = known && levelInfo.exists(l.iid) ? levelInfo.get(l.iid) : null;
+			var title = info != null && info.title != null ? ' <span class="g-lv-title">${esc(info.title)}</span>' : "";
+			var score = info != null && info.score != null ? '<span class="g-lv-score">${Math.round(info.score * 100)}%</span>' : "";
+			rows.add('<div class="g-lv${l.iid == cur ? " cur" : ""}" data-iid="${esc(l.iid)}"><span class="g-lv-id">${esc(l.identifier)}</span>$title$score</div>');
+		}
+		jLevelList.html(rows.toString());
+		jLevelEditing.text('Editing: ${cur != null ? levelLabel(cur) : "-"}');
+	}
+
+	function levelPrompt(iid:String) : String {
+		var editor = activeEditor();
+		if( editor != null )
+			for( l in editor.curWorld.levels )
+				if( l.iid == iid )
+					for( fi in l.fieldInstances )
+						if( fi.def.identifier == "gldtk_prompt" && !fi.valueIsNull(0) ) return fi.getString(0);
+		return "";
+	}
+
+	function regenerateLevel() {
+		var iid = curLevelIid();
+		if( iid == null || editTargetPath() == null ) return;
+		saveFirst( ()-> generate(iid, levelPrompt(iid)) );
+	}
+
+	function worldHtml(w:Null<Dynamic>) : String {
+		if( w == null ) return "";
+		var lvs : Array<Dynamic> = w.levels != null ? w.levels : [];
+		var score : Null<Float> = w.requirements_score;
+		return '<span class="g-meta">World ${w.title != null ? esc(w.title) : ""} · ${lvs.length} levels' +
+			( score != null ? ' · ${Math.round(score * 100)}%' : "" ) + '</span>';
+	}
+
 	// ── Generate ──────────────────────────────────────────────────────────
 
-	function generate() {
-		var description = StringTools.trim( jPrompt.val() );
-		if( description.length == 0 ) return;
+	/** `regenLevel`: iid of the one level to regenerate; its own prompt is used when `description` is empty. **/
+	function generate(?regenLevel:String, ?levelPrompt:String) {
+		var description = regenLevel != null ? levelPrompt : StringTools.trim( jPrompt.val() );
+		if( regenLevel == null && description.length == 0 ) return;
 
 		// Require an open project
 		var outPath = currentProjectPath();
@@ -1546,7 +1690,9 @@ class GldtkSidebar {
 			return;
 		}
 
-		appendMsg("user", esc(description));
+		appendMsg("user", regenLevel != null
+			? '<span class="g-meta">&#x21BB; Regenerate ${esc(levelLabel(regenLevel))}</span>' + esc(description)
+			: esc(description));
 
 		var payload : Dynamic = {
 			description: description,
@@ -1558,6 +1704,10 @@ class GldtkSidebar {
 		var model = StringTools.trim( jModel.val() );
 		if( model.length > 0 )
 			Reflect.setField(payload, "model", model);
+		if( regenLevel != null )
+			payload.level = regenLevel;
+		else if( jLevels.val() != "" )
+			payload.levels = Std.parseInt( jLevels.val() );
 
 		setBusy(true);
 		setStatus("generating…");
@@ -1604,6 +1754,7 @@ class GldtkSidebar {
 				etParts.push( Reflect.field(entMap, k) + "×" + k );
 
 		if( res.output_path != null ) writtenPath = res.output_path;
+		takeLevels(res, writtenPath);
 		takeRoute(res.route, writtenPath);
 		takeDifficulty(res.difficulty, writtenPath);
 		var verified = res.verified == true ? "beatable" : "not verified";
@@ -1620,6 +1771,7 @@ class GldtkSidebar {
 		appendMsg("ai",
 			header +
 			'<span class="g-meta">${esc(themeStr)} · $nodes nodes · $edges edges · $verified · ${etParts.join(" ")}</span>' +
+			worldHtml(res.world) +
 			fidelityHtml(res.fidelity) +
 			warnHtml +
 			ascii +
@@ -1699,10 +1851,16 @@ class GldtkSidebar {
 					return;
 				}
 				editor.selectProject(p);
+				if( fullReload ) {
+					// new levels: the world render still holds the old ones and would crash on the next viewport change
+					fullReload = false;
+					editor.selectWorld(p.worlds[0], false);
+				}
 				editor.resetTools();
 				editor.camera.fit(true);
 				editor.updateTitle();
 				App.ME.registerRecentProject(p.filePath.full);
+				reselectLevel();
 				setStatus("ready");
 			},
 			(err)-> {

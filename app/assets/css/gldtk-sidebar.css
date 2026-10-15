@@ -620,3 +620,18 @@
 #gldtk-play .gp-head > .gp-prof { flex: 1 1 auto; }
 #gldtk-play .gp-ghost input { margin: 0; width: auto; }
 #gldtk-play .gp-close { width: auto; }
+
+/* ── Multi-level worlds (v3 Part 17b) ───────────────────────────────────── */
+#gldtk-root .g-gen-row { display: flex; gap: 6px; align-items: stretch; }
+#gldtk-root .g-gen-row select { flex: 0 0 96px; width: 96px; }
+#gldtk-root .g-gen-row .g-gen-btn { flex: 1; width: auto; }
+#gldtk-root .g-levels { display: none; padding: 4px 2px; border-bottom: 1px solid #2e333f; font-size: 10px; color: #737f9d; }
+#gldtk-root .g-levels.open { display: block; }
+#gldtk-root .g-levels-editing { color: #c1cfeb; font-weight: 700; padding-bottom: 3px; }
+#gldtk-root .g-level-list { display: flex; flex-direction: column; gap: 1px; margin-bottom: 4px; }
+#gldtk-root .g-lv { display: flex; gap: 6px; align-items: baseline; padding: 2px 5px; border-radius: 3px; cursor: pointer; }
+#gldtk-root .g-lv:hover { background: #2e333f; }
+#gldtk-root .g-lv.cur { background: #34405c; color: #fff; }
+#gldtk-root .g-lv-id { font-weight: 700; color: #c1cfeb; }
+#gldtk-root .g-lv-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#gldtk-root .g-lv-score { margin-left: auto; }

@@ -504,6 +504,8 @@ class WorldRender extends dn.Process {
 				continue;
 
 			var l = project.getLevelAnywhere(wl.uid);
+			if( l==null ) // GLDtk swaps the project in place after a generate
+				continue;
 			if( !camera.isOnScreenLevel(l, 256) || l.worldDepth!=editor.curWorldDepth ) {
 				wl.fieldsRender.visible = false;
 				continue;
