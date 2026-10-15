@@ -21,6 +21,8 @@ class GldtkSidebar {
 	static inline var PROFILE_KEY  = "gldtk_profile_open";
 	static inline var EDIT_KEY     = "gldtk_edit_open";
 	static inline var MODE_KEY     = "gldtk_edit_mode";
+	static inline var ROUTE_KEY    = "gldtk_route_on";
+	static inline var ROUTE_DEBOUNCE_MS = 800;
 
 	// Overlay colours on the level canvas
 	static inline var AREA_COLOR    = 0xffcc00;
@@ -83,6 +85,8 @@ class GldtkSidebar {
 	var jEditPrompt: J;
 	var jEditBtn   : J;
 	var jUndo      : J;
+	var jRouteOn   : J;
+	var jRouteSum  : J;
 	var collapsed  : Bool   = false;
 	var busy       : Bool   = false;
 
@@ -99,6 +103,14 @@ class GldtkSidebar {
 	var snapshots   : Array<Dynamic> = []; // GET /history, newest first
 	var editPath    : Null<String>;      // project the selection belongs to
 	var overlay     : Null<h2d.Graphics>;
+
+	// Golden route (v3 Part 13)
+	var routeOverlay      = new GldtkRouteOverlay();
+	var route             : Null<Dynamic>;     // RouteModel of `routePath`
+	var routePath         : Null<String>;
+	var routeSeq          = 0;                 // bumped to drop stale /route answers
+	var routeTimer        : Null<haxe.Timer>;  // debounced refetch
+	var routeFromResponse = false;             // `route` came with a result: the reload needs no refetch
 
 	public function new() {
 		injectCss();
@@ -141,6 +153,13 @@ class GldtkSidebar {
 
 				<div class="g-file-row" id="g-file-row">
 					<span class="g-file-label">No project open</span>
+				</div>
+
+				<div class="g-route-row">
+					<label class="g-route-toggle" title="Draw the cheapest Start → Exit route over the level">
+						<input type="checkbox" id="g-route-on"/>Show route
+					</label>
+					<span class="g-route-sum" id="g-route-sum"></span>
 				</div>
 
 				<div class="g-fold-head" id="g-prof-head">
@@ -243,6 +262,8 @@ class GldtkSidebar {
 		jEditPrompt = jRoot.find("#g-edit-prompt");
 		jEditBtn    = jRoot.find("#g-edit-btn");
 		jUndo       = jRoot.find("#g-undo");
+		jRouteOn    = jRoot.find("#g-route-on");
+		jRouteSum   = jRoot.find("#g-route-sum");
 
 		jEditHead.click( _-> setEditOpen( !jEditHead.hasClass("open") ) );
 		jEdit.find(".g-mode-btn").click( (ev:js.jquery.Event)-> setEditMode( new J(ev.currentTarget).attr("data-mode") ) );
@@ -252,6 +273,10 @@ class GldtkSidebar {
 		jSection.change( _-> { refreshTarget(); drawOverlay(); bleepRect(selectedSectionRect(), SECTION_COLOR); } );
 		jEditBtn.click( _-> if( !busy ) applyEdit() );
 		jUndo.click( _-> if( !busy ) undo() );
+		jRouteOn.change( _-> {
+			saveStr(ROUTE_KEY, jRouteOn.prop("checked") ? "1" : "0");
+			drawRoute();
+		});
 		jEditPrompt.on("keydown", function(ev:js.jquery.Event) {
 			var ke : js.html.KeyboardEvent = cast Reflect.field(ev, "originalEvent");
 			if( ke != null && ke.key == "Enter" && (ke.ctrlKey || ke.metaKey) && !busy ) applyEdit();
@@ -307,12 +332,47 @@ class GldtkSidebar {
 		if( editor != null )
 			editor.ge.addGlobalListener(onEditorEvent);
 		onProjectChanged();
+		clearRoute();
+		scheduleRouteFetch();
 	}
 
 	function onEditorEvent(e:GlobalEvent) {
 		switch e {
-			case ProjectSelected, ProjectSaved: onProjectChanged();
-			case LevelSelected(_): refreshSections(); drawOverlay();
+			case ProjectSelected:
+				onProjectChanged();
+				if( routeFromResponse && samePath(routePath, currentProjectPath()) ) {
+					routeFromResponse = false; // reload after a generate / edit / undo: its route is current
+					drawRoute();
+				}
+				else {
+					clearRoute();
+					scheduleRouteFetch();
+				}
+
+			case ProjectSaved:
+				onProjectChanged();
+				scheduleRouteFetch();
+
+			case LevelSelected(l):
+				refreshSections();
+				drawOverlay();
+				if( route != null && route.level_iid == l.iid )
+					drawRoute();
+				else {
+					clearRoute();
+					scheduleRouteFetch();
+				}
+
+			case ViewportChanged(true):
+				drawRoute(); // line widths follow the zoom
+
+			// Hand edits
+			case LayerInstanceEditedByTool(_), LayerInstanceChangedGlobally(_),
+				LayerInstancesRestoredFromHistory(_), LevelRestoredFromHistory(_),
+				EntityInstanceAdded(_), EntityInstanceRemoved(_), EntityInstanceChanged(_),
+				EntityFieldInstanceChanged(_):
+				scheduleRouteFetch();
+
 			case _:
 		}
 	}
@@ -352,6 +412,7 @@ class GldtkSidebar {
 		var mode = loadStr(MODE_KEY);
 		setEditMode( mode != null && EDIT_MODES.filter( m->m.id == mode ).length > 0 ? mode : EDIT_MODES[0].id );
 		setEditOpen( loadStr(EDIT_KEY) != "0" );
+		jRouteOn.prop("checked", loadStr(ROUTE_KEY) != "0");
 		refreshFileRow();
 	}
 
@@ -372,7 +433,7 @@ class GldtkSidebar {
 
 	// ── Server ────────────────────────────────────────────────────────────
 
-	/** JSON request; `res` is null when the body is not JSON. **/
+	/** JSON request (a String body is sent as it is); `res` is null when the response is not JSON. **/
 	function request(method:String, route:String, body:Null<Dynamic>,
 	                 onDone:(status:Int, res:Dynamic)->Void, onOffline:Void->Void) {
 		var xhr = new js.html.XMLHttpRequest();
@@ -384,7 +445,7 @@ class GldtkSidebar {
 			onDone(xhr.status, res);
 		};
 		xhr.onerror = function(_) onOffline();
-		xhr.send( body != null ? haxe.Json.stringify(body) : null );
+		xhr.send( body == null ? null : Std.isOfType(body, String) ? body : haxe.Json.stringify(body) );
 	}
 
 	function loadProviders() {
@@ -1066,6 +1127,7 @@ class GldtkSidebar {
 				refreshHistory();
 				return;
 			}
+			takeRoute(res.route, path);
 			var label = newest.label != null ? newest.label : newest.timestamp;
 			var remaining : Null<Int> = res.remaining;
 			appendMsg("ai",
@@ -1080,6 +1142,105 @@ class GldtkSidebar {
 			appendMsg("err", "Cannot reach GLDtk server — is <code>python server.py</code> running?");
 			setStatus("offline");
 		});
+	}
+
+	// ── Golden route (v3 Part 13) ─────────────────────────────────────────
+
+	/** The route of a generate / edit / undo response, for the file about to be reloaded. **/
+	function takeRoute(r:Null<Dynamic>, path:String) {
+		if( r == null || !samePath(path, currentProjectPath()) ) return; // not reloaded: ProjectSelected refetches
+		setRoute(r, path);
+		routeFromResponse = true;
+	}
+
+	function setRoute(r:Dynamic, path:String) {
+		cancelRouteFetch();
+		routeSeq++;
+		route = r;
+		routePath = path;
+		refreshRouteSummary();
+		drawRoute();
+	}
+
+	function clearRoute() {
+		cancelRouteFetch();
+		routeSeq++;
+		route = null;
+		routePath = null;
+		routeFromResponse = false;
+		refreshRouteSummary();
+		routeOverlay.clear();
+	}
+
+	function cancelRouteFetch() {
+		if( routeTimer != null ) {
+			routeTimer.stop();
+			routeTimer = null;
+		}
+	}
+
+	/** Refetches the route a little after the last change. **/
+	function scheduleRouteFetch() {
+		cancelRouteFetch();
+		if( currentProjectPath() == null ) return;
+		routeTimer = haxe.Timer.delay( ()-> { routeTimer = null; fetchRoute(); }, ROUTE_DEBOUNCE_MS );
+	}
+
+	/** GET /route reads the saved file; with unsaved changes, POST /route sends the project as it is in LDtk. **/
+	function fetchRoute() {
+		var editor = activeEditor();
+		var path = currentProjectPath();
+		if( editor == null || path == null ) return;
+		var seq = ++routeSeq;
+		if( route == null )
+			jRouteSum.removeClass("g-route-bad").text("Route: checking…");
+
+		function onDone(status:Int, res:Dynamic) {
+			if( seq != routeSeq || !samePath(path, currentProjectPath()) ) return;
+			setRoute( status == 200 && res != null ? res : { success: false, error: errorText(status, res) }, path );
+		}
+		function onOffline() {
+			if( seq != routeSeq ) return;
+			route = null;
+			routeOverlay.clear();
+			jRouteSum.removeClass("g-route-bad").text("Route: server offline");
+		}
+		if( editor.needSaving ) {
+			var body = '{"path":${haxe.Json.stringify(path)},"project":${dn.data.JsonPretty.stringify(editor.project.toJson(), Minified)}}';
+			request("POST", "/route", body, onDone, onOffline);
+		}
+		else
+			request("GET", "/route?path=" + StringTools.urlEncode(path), null, onDone, onOffline);
+	}
+
+	function refreshRouteSummary() {
+		jRouteSum.removeClass("g-route-bad");
+		if( route == null ) {
+			jRouteSum.text("");
+			return;
+		}
+		if( route.success != true ) {
+			jRouteSum.addClass("g-route-bad").text('No route: ${route.error != null ? route.error : "unknown error"}');
+			return;
+		}
+		var steps : Array<Dynamic> = route.steps != null ? route.steps : [];
+		var jumps = steps.filter( s->s.kind == "jump" ).length;
+		var abilities = steps.filter( s->s.ability != null ).length;
+		var html = esc('Route: ${steps.length} move${steps.length == 1 ? "" : "s"} ($jumps jump${jumps == 1 ? "" : "s"}, $abilities ability move${abilities == 1 ? "" : "s"})');
+		var lost : Array<Dynamic> = route.unreachable_required != null ? route.unreachable_required : [];
+		if( lost.length > 0 )
+			html += ' <span class="g-route-lost">· ${lost.length} required entit${lost.length == 1 ? "y" : "ies"} unreachable</span>';
+		jRouteSum.html(html);
+	}
+
+	function drawRoute() {
+		var editor = activeEditor();
+		var li = gridLayer();
+		if( editor == null || li == null || route == null || !jRouteOn.prop("checked") || !samePath(routePath, currentProjectPath()) ) {
+			routeOverlay.clear();
+			return;
+		}
+		routeOverlay.draw(route, editor.curLevel, li.def.gridSize);
 	}
 
 	// ── Generate ──────────────────────────────────────────────────────────
@@ -1147,6 +1308,7 @@ class GldtkSidebar {
 				etParts.push( Reflect.field(entMap, k) + "×" + k );
 
 		if( res.output_path != null ) writtenPath = res.output_path;
+		takeRoute(res.route, writtenPath);
 		var verified = res.verified == true ? "beatable" : "not verified";
 
 		var warnings : Array<String> = res.warnings != null ? res.warnings : [];

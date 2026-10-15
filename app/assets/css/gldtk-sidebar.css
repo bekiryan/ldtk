@@ -433,3 +433,26 @@
   letter-spacing: .5px;
 }
 #gldtk-root .g-gen-btn:disabled { opacity: .4; cursor: not-allowed; }
+
+/* ── Golden route (v3 Part 13) ──────────────────────────────────────────── */
+#gldtk-root .g-route-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  padding: 4px 2px;
+  font-size: 10px;
+  color: #737f9d;
+  border-bottom: 1px solid #2e333f;
+}
+#gldtk-root .g-route-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: #c1cfeb;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+#gldtk-root .g-route-sum { min-width: 0; word-break: break-word; }
+#gldtk-root .g-route-sum.g-route-bad,
+#gldtk-root .g-route-lost { color: #ff6b5b; }
