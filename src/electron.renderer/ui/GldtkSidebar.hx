@@ -184,6 +184,10 @@ class GldtkSidebar {
 					<span class="g-file-label">No project open</span>
 				</div>
 
+				<div class="g-play-row">
+					<button id="g-play" class="g-play-btn" title="Play the level with the Game Profile physics (Esc to close)">&#x25B6;&nbsp; Play</button>
+				</div>
+
 				<div class="g-route-row">
 					<label class="g-route-toggle" title="Draw the cheapest Start → Exit route over the level">
 						<input type="checkbox" id="g-route-on"/>Show route
@@ -316,6 +320,7 @@ class GldtkSidebar {
 		jSection.change( _-> { refreshTarget(); drawOverlay(); bleepRect(selectedSectionRect(), SECTION_COLOR); } );
 		jEditBtn.click( _-> if( job != null ) cancelJob() else if( !busy ) applyEdit() );
 		jUndo.click( _-> if( !busy ) undo() );
+		jRoot.find("#g-play").click( _-> play() );
 		jRouteOn.change( _-> {
 			saveStr(ROUTE_KEY, jRouteOn.prop("checked") ? "1" : "0");
 			drawRoute();
@@ -1324,6 +1329,25 @@ class GldtkSidebar {
 			return;
 		}
 		routeOverlay.draw(route, editor.curLevel, li.def.gridSize);
+	}
+
+	// ── Play mode (v3 Part 16) ────────────────────────────────────────────
+
+	/** Saves unsaved changes (as edits do), then plays the current level. **/
+	function play() {
+		var path = editTargetPath();
+		var editor = activeEditor();
+		if( path == null || editor == null ) return;
+		if( editor.curLevel == null ) {
+			appendMsg("err", "Select a level to play first.");
+			return;
+		}
+		saveFirst( ()-> {
+			var editor = activeEditor();
+			if( editor == null || editor.curLevel == null || !samePath(path, currentProjectPath()) ) return;
+			setStatus("ready");
+			ui.gldtk.GldtkPlay.open(editor.project, editor.curLevel, path);
+		});
 	}
 
 	// ── Difficulty chart (v3 Part 15b) ────────────────────────────────────
