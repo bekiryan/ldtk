@@ -523,3 +523,17 @@
 #gldtk-root .g-route-sum { min-width: 0; word-break: break-word; }
 #gldtk-root .g-route-sum.g-route-bad,
 #gldtk-root .g-route-lost { color: #ff6b5b; }
+
+/* ── Difficulty chart (v3 Part 15b) ─────────────────────────────────────── */
+#gldtk-root .g-diff:empty { display: none; }
+#gldtk-root .g-diff { padding: 6px 2px; border-bottom: 1px solid #2e333f; font-size: 10px; color: #737f9d; }
+#gldtk-root .g-diff-title { margin-bottom: 4px; letter-spacing: .5px; text-transform: uppercase; }
+#gldtk-root .g-diff-bars { display: flex; align-items: flex-end; gap: 4px; }
+#gldtk-root .g-diff-bar { flex: 1 1 0; min-width: 0; text-align: center; cursor: default; }
+#gldtk-root .g-diff-bar:hover .g-diff-col { outline: 1px solid #c1cfeb; }
+#gldtk-root .g-diff-warn { height: 12px; color: #ffcc00; font-size: 11px; line-height: 12px; }
+#gldtk-root .g-diff-col { height: 48px; display: flex; align-items: flex-end; background: #232730; border-radius: 2px; }
+#gldtk-root .g-diff-fill { width: 100%; border-radius: 2px 2px 0 0; }
+#gldtk-root .g-diff-score { color: #c1cfeb; margin-top: 2px; }
+#gldtk-root .g-diff-name, #gldtk-root .g-diff-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#gldtk-root .g-diff-curve { margin-top: 4px; color: #ffcc00; word-break: break-word; }

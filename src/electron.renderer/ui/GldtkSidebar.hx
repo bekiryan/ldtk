@@ -24,6 +24,7 @@ class GldtkSidebar {
 	static inline var MODE_KEY     = "gldtk_edit_mode";
 	static inline var ROUTE_KEY    = "gldtk_route_on";
 	static inline var ROUTE_DEBOUNCE_MS = 800;
+	static inline var DIFF_DEBOUNCE_MS = 800;
 	static inline var PROGRESS_POLL_MS  = 1000;
 
 	// Overlay colours on the level canvas
@@ -89,6 +90,7 @@ class GldtkSidebar {
 	var jUndo      : J;
 	var jRouteOn   : J;
 	var jRouteSum  : J;
+	var jDiff      : J;
 	var jProgress  : J;
 	var jProgMsg   : J;
 	var jProgTime  : J;
@@ -117,6 +119,13 @@ class GldtkSidebar {
 	var routeSeq          = 0;                 // bumped to drop stale /route answers
 	var routeTimer        : Null<haxe.Timer>;  // debounced refetch
 	var routeFromResponse = false;             // `route` came with a result: the reload needs no refetch
+
+	// Difficulty chart (v3 Part 15b)
+	var difficulty        : Null<Dynamic>;     // DifficultyModel of `difficultyPath`
+	var difficultyPath    : Null<String>;
+	var difficultySeq     = 0;                 // bumped to drop stale /difficulty answers
+	var difficultyTimer   : Null<haxe.Timer>;
+	var difficultyFromResponse = false;
 
 	// Live progress + Cancel (v3 Part 14)
 	var job : Null<GldtkJob>;                  // the running generate / edit / locate
@@ -181,6 +190,8 @@ class GldtkSidebar {
 					</label>
 					<span class="g-route-sum" id="g-route-sum"></span>
 				</div>
+
+				<div class="g-diff" id="g-diff"></div>
 
 				<div class="g-fold-head" id="g-prof-head">
 					<span class="g-caret"></span>GAME PROFILE
@@ -290,6 +301,12 @@ class GldtkSidebar {
 		jUndo       = jRoot.find("#g-undo");
 		jRouteOn    = jRoot.find("#g-route-on");
 		jRouteSum   = jRoot.find("#g-route-sum");
+		jDiff       = jRoot.find("#g-diff");
+		jDiff.on("mouseenter", ".g-diff-bar", function(ev:js.jquery.Event) {
+			var id = new J(ev.currentTarget).attr("data-id");
+			for( s in sections )
+				if( s.id == id ) { bleepRect(sectionRect(s), SECTION_COLOR); break; }
+		});
 
 		jEditHead.click( _-> setEditOpen( !jEditHead.hasClass("open") ) );
 		jEdit.find(".g-mode-btn").click( (ev:js.jquery.Event)-> setEditMode( new J(ev.currentTarget).attr("data-mode") ) );
@@ -364,6 +381,8 @@ class GldtkSidebar {
 		onProjectChanged();
 		clearRoute();
 		scheduleRouteFetch();
+		clearDifficulty();
+		scheduleDifficultyFetch();
 	}
 
 	function onEditorEvent(e:GlobalEvent) {
@@ -378,10 +397,17 @@ class GldtkSidebar {
 					clearRoute();
 					scheduleRouteFetch();
 				}
+				if( difficultyFromResponse && samePath(difficultyPath, currentProjectPath()) )
+					difficultyFromResponse = false;
+				else {
+					clearDifficulty();
+					scheduleDifficultyFetch();
+				}
 
 			case ProjectSaved:
 				onProjectChanged();
 				scheduleRouteFetch();
+				scheduleDifficultyFetch();
 
 			case LevelSelected(l):
 				refreshSections();
@@ -392,6 +418,7 @@ class GldtkSidebar {
 					clearRoute();
 					scheduleRouteFetch();
 				}
+				scheduleDifficultyFetch(); // the sections of the new level
 
 			case ViewportChanged(true):
 				drawRoute(); // line widths follow the zoom
@@ -402,6 +429,7 @@ class GldtkSidebar {
 				EntityInstanceAdded(_), EntityInstanceRemoved(_), EntityInstanceChanged(_),
 				EntityFieldInstanceChanged(_):
 				scheduleRouteFetch();
+				scheduleDifficultyFetch();
 
 			case _:
 		}
@@ -778,8 +806,9 @@ class GldtkSidebar {
 	}
 
 	/** The section's band; old files only store the columns of horizontal sections. **/
-	function selectedSectionRect() : Null<GldtkRect> {
-		var s = selectedSection();
+	function selectedSectionRect() : Null<GldtkRect> return sectionRect( selectedSection() );
+
+	function sectionRect(s:Null<Dynamic>) : Null<GldtkRect> {
 		var li = gridLayer();
 		if( s == null || li == null ) return null;
 		var c0 : Int = s.col_start != null ? s.col_start : 0;
@@ -1181,6 +1210,7 @@ class GldtkSidebar {
 				return;
 			}
 			takeRoute(res.route, path);
+			takeDifficulty(res.difficulty, path);
 			var label = newest.label != null ? newest.label : newest.timestamp;
 			var remaining : Null<Int> = res.remaining;
 			appendMsg("ai",
@@ -1294,6 +1324,100 @@ class GldtkSidebar {
 			return;
 		}
 		routeOverlay.draw(route, editor.curLevel, li.def.gridSize);
+	}
+
+	// ── Difficulty chart (v3 Part 15b) ────────────────────────────────────
+
+	/** The difficulty of a generate / edit / undo response, for the file about to be reloaded. **/
+	function takeDifficulty(d:Null<Dynamic>, path:String) {
+		if( d == null || !samePath(path, currentProjectPath()) ) return;
+		setDifficulty(d, path);
+		difficultyFromResponse = true;
+	}
+
+	function setDifficulty(d:Dynamic, path:String) {
+		cancelDifficultyFetch();
+		difficultySeq++;
+		difficulty = d;
+		difficultyPath = path;
+		drawDifficulty();
+	}
+
+	function clearDifficulty() {
+		cancelDifficultyFetch();
+		difficultySeq++;
+		difficulty = null;
+		difficultyPath = null;
+		difficultyFromResponse = false;
+		drawDifficulty();
+	}
+
+	function cancelDifficultyFetch() {
+		if( difficultyTimer != null ) {
+			difficultyTimer.stop();
+			difficultyTimer = null;
+		}
+	}
+
+	function scheduleDifficultyFetch() {
+		cancelDifficultyFetch();
+		if( currentProjectPath() == null ) return;
+		difficultyTimer = haxe.Timer.delay( ()-> { difficultyTimer = null; fetchDifficulty(); }, DIFF_DEBOUNCE_MS );
+	}
+
+	/** GET /difficulty reads the saved file, so hand edits show once they are saved. **/
+	function fetchDifficulty() {
+		var path = currentProjectPath();
+		if( path == null ) return;
+		var seq = ++difficultySeq;
+		request("GET", "/difficulty?path=" + StringTools.urlEncode(path), null, (status, res)-> {
+			if( seq != difficultySeq || !samePath(path, currentProjectPath()) ) return;
+			setDifficulty( status == 200 && res != null ? res : { success: false, error: errorText(status, res) }, path );
+		}, ()-> {
+			if( seq != difficultySeq ) return;
+			difficulty = null;
+			jDiff.empty();
+		});
+	}
+
+	static function diffColor(label:String) : String
+		return switch label { case "easy": "#5bc470"; case "hard": "#ff6b5b"; case _: "#f2b84b"; }
+
+	function drawDifficulty() {
+		jDiff.empty();
+		if( difficulty == null || !samePath(difficultyPath, currentProjectPath()) ) return;
+		var secs : Array<Dynamic> = difficulty.sections != null ? difficulty.sections : [];
+		// /undo drops unset defaults from its response, so a missing `success` means true
+		var ok = difficulty.success != false;
+		if( !ok || secs.length == 0 ) {
+			if( !ok )
+				jDiff.html('<div class="g-diff-title g-route-bad">Difficulty: ${esc(difficulty.error != null ? difficulty.error : "unavailable")}</div>');
+			return;
+		}
+		var overall = difficulty.overall != null ? ' · overall ${Std.string(Math.round(difficulty.overall*10)/10)}' : "";
+		var html = '<div class="g-diff-title">Difficulty$overall</div><div class="g-diff-bars">';
+		for( s in secs ) {
+			var score : Float = s.score;
+			var warns : Array<String> = s.warnings != null ? s.warnings : [];
+			var tip = '${s.name}: ${s.label}, score ${Math.round(score*10)/10}/10';
+			for( w in warns ) tip += '\n⚠ $w';
+			var m : Dynamic = s.metrics;
+			if( m != null )
+				for( k in Reflect.fields(m) ) {
+					var v : Dynamic = Reflect.field(m, k);
+					if( Std.isOfType(v, Float) ) tip += '\n$k: ${Math.round((v:Float)*100)/100}';
+				}
+			html += '<div class="g-diff-bar" data-id="${esc(s.id)}" title="${esc(tip)}">' +
+				'<div class="g-diff-warn">${warns.length > 0 ? "&#x26A0;" : ""}</div>' +
+				'<div class="g-diff-col"><div class="g-diff-fill" style="height:${Std.int(Math.max(2, score*10))}%;background:${diffColor(s.label)}"></div></div>' +
+				'<div class="g-diff-score">${Math.round(score*10)/10}</div>' +
+				'<div class="g-diff-name">${esc(s.name)}</div>' +
+				'<div class="g-diff-label" style="color:${diffColor(s.label)}">${esc(s.label)}</div></div>';
+		}
+		html += '</div>';
+		var lw : Array<String> = difficulty.warnings != null ? difficulty.warnings : [];
+		for( w in lw ) html += '<div class="g-diff-curve">&#x26A0; ${esc(w)}</div>';
+		jDiff.html(html);
 	}
 
 	// ── Live progress + Cancel (v3 Part 14) ───────────────────────────────
@@ -1457,6 +1581,7 @@ class GldtkSidebar {
 
 		if( res.output_path != null ) writtenPath = res.output_path;
 		takeRoute(res.route, writtenPath);
+		takeDifficulty(res.difficulty, writtenPath);
 		var verified = res.verified == true ? "beatable" : "not verified";
 
 		var warnings : Array<String> = res.warnings != null ? res.warnings : [];
