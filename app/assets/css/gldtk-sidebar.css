@@ -635,3 +635,15 @@
 #gldtk-root .g-lv-id { font-weight: 700; color: #c1cfeb; }
 #gldtk-root .g-lv-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #gldtk-root .g-lv-score { margin-left: auto; }
+
+/* ── Section structure + Design memory ──────────────────────────────────── */
+#gldtk-root select.g-structure { margin-top: 3px; width: 100%; font-size: 10px; }
+#gldtk-root .g-mem-rule { display: flex; align-items: center; gap: 3px; padding: 1px 0; }
+#gldtk-root .g-mem-text { flex: 1; min-width: 0; font-size: 10px; }
+#gldtk-root .g-mem-badge { font-size: 8px; color: #737f9d; border: 1px solid #2e333f; border-radius: 3px; padding: 0 3px; }
+#gldtk-root .g-mem-conf { font-size: 9px; color: #737f9d; min-width: 24px; text-align: right; }
+#gldtk-root .g-mem-none { font-size: 10px; color: #545d73; padding: 2px 0; }
+#gldtk-root .g-mem-stats { margin-top: 3px; }
+#gldtk-root .g-mem-stats b, #gldtk-root .g-prow b { font-weight: 600; color: #c1cfeb; }
+#gldtk-root .g-mem-btns { display: flex; gap: 4px; margin-top: 4px; }
+#gldtk-root .g-mem-btns button { flex: 1; }

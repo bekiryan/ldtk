@@ -20,6 +20,9 @@ class GldtkSidebar {
 	static inline var PROVIDER_KEY = "gldtk_provider";
 	static inline var MODEL_KEY    = "gldtk_model";
 	static inline var PROFILE_KEY  = "gldtk_profile_open";
+	static inline var MEMORY_KEY   = "gldtk_memory_open";
+	static var STRUCTURES = ["corridor","parkour","labyrinth","arena","shaft","hub","open"];
+	static var MEMORY_STATS = ["gap","enemy_spacing_median","removed_kinds","undo_rate"];
 	static inline var EDIT_KEY     = "gldtk_edit_open";
 	static inline var MODE_KEY     = "gldtk_edit_mode";
 	static inline var ROUTE_KEY    = "gldtk_route_on";
@@ -83,6 +86,11 @@ class GldtkSidebar {
 	var jAreaBtn   : J;
 	var jTarget    : J;
 	var jSection   : J;
+	var jStructure : J;
+	var jMemHead   : J;
+	var jMemNote   : J;
+	var jMem       : J;
+	var memory     : Null<Dynamic>;
 	var jLocText   : J;
 	var jLocated   : J;
 	var jEditPrompt: J;
@@ -247,6 +255,12 @@ class GldtkSidebar {
 					<button class="g-prof-save" id="g-prof-save">Save profile</button>
 				</div>
 
+				<div class="g-fold-head" id="g-mem-head">
+					<span class="g-caret"></span>DESIGN MEMORY
+					<span class="g-hint" id="g-mem-note"></span>
+				</div>
+				<div class="g-prof g-mem" id="g-mem"></div>
+
 				<div class="g-fold-head" id="g-edit-head">
 					<span class="g-caret"></span>EDIT
 					<span class="g-hint" id="g-edit-note"></span>
@@ -260,6 +274,10 @@ class GldtkSidebar {
 					</div>
 					<div class="g-field" data-modes="section">
 						<select id="g-section"></select>
+						<select id="g-structure" class="g-structure" title="Re-shape the selected section (no LLM)">
+							<option value="">Make this section a…</option>
+							${STRUCTURES.map( t->'<option value="$t">Make this section a $t</option>' ).join("")}
+						</select>
 					</div>
 					<div class="g-field" data-modes="describe">
 						<input id="g-loc" type="text" placeholder="Where? eg. the gap before the boss"/>
@@ -316,6 +334,10 @@ class GldtkSidebar {
 		jProfHead = jRoot.find("#g-prof-head");
 		jProfNote = jRoot.find("#g-prof-note");
 		jProf     = jRoot.find("#g-prof");
+		jStructure  = jRoot.find("#g-structure");
+		jMemHead    = jRoot.find("#g-mem-head");
+		jMemNote    = jRoot.find("#g-mem-note");
+		jMem        = jRoot.find("#g-mem");
 		jProfErr  = jRoot.find("#g-prof-err");
 
 		jProgress = jRoot.find("#g-progress");
@@ -352,6 +374,9 @@ class GldtkSidebar {
 		jModel.on("input", _-> saveStr(MODEL_KEY, StringTools.trim(jModel.val())) );
 
 		jProfHead.click( _-> setProfileOpen( !jProfHead.hasClass("open") ) );
+		jMemHead.click( _-> setMemoryOpen( !jMemHead.hasClass("open") ) );
+		jStructure.change( _-> applyStructure() );
+		bindMemory();
 		jRoot.find("#g-prof-save").click( _-> saveProfile() );
 		jProf.find("input[type=checkbox]").change( _-> updateAbilityToggles() );
 
@@ -537,6 +562,7 @@ class GldtkSidebar {
 		var model = loadStr(MODEL_KEY);
 		if( model != null ) jModel.val(model);
 		setProfileOpen( loadStr(PROFILE_KEY) == "1" );
+		setMemoryOpen( loadStr(MEMORY_KEY) == "1" );
 		var mode = loadStr(MODE_KEY);
 		setEditMode( mode != null && EDIT_MODES.filter( m->m.id == mode ).length > 0 ? mode : EDIT_MODES[0].id );
 		setEditOpen( loadStr(EDIT_KEY) != "0" );
@@ -634,6 +660,113 @@ class GldtkSidebar {
 		else
 			refreshEditButton();
 		refreshUndo();
+	}
+
+	// ── Design memory ─────────────────────────────────────────────────────
+
+	function setMemoryOpen(open:Bool) {
+		jMemHead.toggleClass("open", open);
+		jMem.toggle(open);
+		saveStr(MEMORY_KEY, open ? "1" : "0");
+		if( open ) refreshMemory();
+	}
+
+	function refreshMemory() {
+		if( !jMemHead.hasClass("open") ) return;
+		request("GET", "/memory", null, (status, res)-> {
+			if( status == 200 && res != null ) { memory = res; renderMemory(); }
+			else jMemNote.text("error");
+		}, ()-> jMemNote.text("server offline") );
+	}
+
+	function putMemory(body:Dynamic) {
+		request("PUT", "/memory", body, (status, res)-> {
+			if( status == 200 && res != null ) { memory = res; renderMemory(); }
+			else jMemNote.text("error: " + errorText(status, res));
+		}, ()-> jMemNote.text("server offline") );
+	}
+
+	function renderMemory() {
+		var m : Dynamic = memory;
+		var enabled = m.enabled != false;
+		var rules : Array<Dynamic> = m.rules != null ? m.rules : [];
+		var stats : Dynamic = m.stats != null ? m.stats : {};
+		var h = '<label class="g-ptoggle"><input type="checkbox" id="g-mem-on" ${enabled ? "checked" : ""}/>Learn from my edits</label>';
+		h += '<div class="g-mem-rules">';
+		if( rules.length == 0 )
+			h += '<div class="g-mem-none">No rules yet</div>';
+		for( r in rules ) {
+			var on = r.enabled != false;
+			var conf : Null<Float> = r.confidence;
+			h += '<div class="g-mem-rule${on ? "" : " g-off"}" data-id="${esc(r.id)}">' +
+				'<input type="checkbox" class="g-mem-en" ${on ? "checked" : ""} title="Use this rule"/>' +
+				'<input type="text" class="g-mem-text" value="${esc(r.text)}"/>' +
+				'<span class="g-mem-badge" title="source">${esc(r.source)}</span>' +
+				'<span class="g-mem-conf" title="confidence">${conf != null ? Math.round(conf*100) + "%" : ""}</span>' +
+				'<button class="g-x g-mem-del" title="Delete rule">&times;</button></div>';
+		}
+		h += '</div>';
+		var st = [];
+		for( k in MEMORY_STATS ) {
+			var v : Dynamic = Reflect.field(stats, k);
+			if( v == null ) continue;
+			var vs = memStatStr(v);
+			if( vs == "" ) continue;
+			st.push('<div class="g-prow"><span>${esc(k)}</span><b>${esc(vs)}</b></div>');
+		}
+		h += '<div class="g-mem-stats">${st.join("")}</div>';
+		h += '<div class="g-prow"><span>events</span><b id="g-mem-events">${m.event_count != null ? m.event_count : 0}</b></div>';
+		h += '<div class="g-mem-btns"><button class="g-small-btn" id="g-mem-scan">Scan now</button>' +
+			'<button class="g-small-btn" id="g-mem-reset">Reset</button></div>';
+		jMem.html(h);
+		jMemNote.text( enabled ? rules.length + " rule" + (rules.length == 1 ? "" : "s") : "off" );
+	}
+
+	/** Compact text for a stat: numbers rounded, objects as `key value` pairs without nulls. **/
+	static function memStatStr(v:Dynamic) : String {
+		if( v == null ) return "";
+		if( Std.isOfType(v, Float) ) return Std.string( Math.round((v:Float)*100)/100 );
+		if( Std.isOfType(v, Array) ) return (v:Array<Dynamic>).map( memStatStr ).join(", ");
+		if( Std.isOfType(v, String) || Std.isOfType(v, Bool) ) return Std.string(v);
+		var parts = [];
+		for( k in Reflect.fields(v) ) {
+			var sub = memStatStr( Reflect.field(v, k) );
+			if( sub != "" ) parts.push('$k $sub');
+		}
+		return parts.join(", ");
+	}
+
+	function bindMemory() {
+		jMem.on("change", "#g-mem-on", function(ev:js.jquery.Event) putMemory({ enabled: new J(ev.target).prop("checked") }) );
+		jMem.on("change", ".g-mem-en", function(ev:js.jquery.Event) {
+			var j = new J(ev.target);
+			putMemory({ rules: [{ id: j.closest(".g-mem-rule").attr("data-id"), enabled: j.prop("checked") }] });
+		});
+		jMem.on("change", ".g-mem-text", function(ev:js.jquery.Event) {
+			var j = new J(ev.target);
+			putMemory({ rules: [{ id: j.closest(".g-mem-rule").attr("data-id"), text: StringTools.trim(j.val()) }] });
+		});
+		jMem.on("click", ".g-mem-del", function(ev:js.jquery.Event) {
+			var id = new J(ev.target).closest(".g-mem-rule").attr("data-id");
+			putMemory({ delete: [id] });
+		});
+		jMem.on("click", "#g-mem-scan", function(_) {
+			var path = currentProjectPath();
+			if( path == null ) { jMemNote.text("no project"); return; }
+			jMemNote.text("scanning…");
+			request("POST", "/memory/scan", { path: path }, (status, res)-> {
+				if( status != 200 ) jMemNote.text("error: " + errorText(status, res));
+				else refreshMemory();
+			}, ()-> jMemNote.text("server offline") );
+		});
+		jMem.on("click", "#g-mem-reset", function(_) {
+			new ui.modal.dialog.Confirm(null, L.untranslated("Reset all design memory (learned rules and stats)?"), true, ()-> {
+				request("DELETE", "/memory", null, (status, res)-> {
+					if( status == 200 ) refreshMemory();
+					else jMemNote.text("error: " + errorText(status, res));
+				}, ()-> jMemNote.text("server offline") );
+			});
+		});
 	}
 
 	// ── Game Profile ──────────────────────────────────────────────────────
@@ -862,10 +995,12 @@ class GldtkSidebar {
 			jSection.html('<option value="">No GLDtk sections in this level</option>');
 		else
 			jSection.html( sections.map( s->'<option value="${esc(s.id)}">${esc(s.name != null ? s.name : s.id)}' +
-				( s.difficulty != null ? ' · ${esc(s.difficulty)}' : "" ) + '</option>' ).join("") );
+				( s.difficulty != null ? ' · ${esc(s.difficulty)}' : "" ) +
+				( s.structure != null ? ' · ${esc(s.structure)}' : "" ) + '</option>' ).join("") );
 		if( prev != null && sections.filter( s->s.id == prev ).length > 0 )
 			jSection.val(prev);
 		jSection.prop("disabled", sections.length == 0);
+		jStructure.prop("disabled", sections.length == 0);
 	}
 
 	function selectedSection() : Null<Dynamic> {
@@ -1090,6 +1225,25 @@ class GldtkSidebar {
 		}
 	}
 
+	function applyStructure() {
+		var type : String = jStructure.val();
+		jStructure.val("");
+		if( type == null || type == "" ) return;
+		var s = selectedSection();
+		if( s == null ) {
+			jEditNote.text("no section to edit");
+			return;
+		}
+		var path = editTargetPath();
+		if( path == null ) return;
+		var prompt = "make this a " + type;
+		var payload = editBase(path);
+		payload.prompt = prompt;
+		payload.section_id = s.id;
+		payload.structure = type;
+		postEdit("/edit/section", payload, 'Section ${s.name != null ? s.name : s.id}', prompt);
+	}
+
 	function postEdit(route:String, payload:Dynamic, label:String, prompt:String, ?onDone:Void->Void) {
 		appendMsg("user", '<span class="g-meta">&#x270E; ${esc(label)}</span>${esc(prompt)}');
 		saveFirst( ()-> sendEdit(route, payload, label, onDone) );
@@ -1288,6 +1442,7 @@ class GldtkSidebar {
 			takeLevels(res, path);
 			takeRoute(res.route, path);
 			takeDifficulty(res.difficulty, path);
+			refreshMemory();
 			var label = newest.label != null ? newest.label : newest.timestamp;
 			var remaining : Null<Int> = res.remaining;
 			appendMsg("ai",
@@ -1787,6 +1942,7 @@ class GldtkSidebar {
 		takeLevels(res, writtenPath);
 		takeRoute(res.route, writtenPath);
 		takeDifficulty(res.difficulty, writtenPath);
+		refreshMemory();
 		var verified = res.verified == true ? "beatable" : "not verified";
 
 		var warnings : Array<String> = res.warnings != null ? res.warnings : [];
