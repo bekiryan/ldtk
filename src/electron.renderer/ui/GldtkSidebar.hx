@@ -1211,13 +1211,22 @@ class GldtkSidebar {
 			'</div>';
 	}
 
+	static function samePath(a:Null<String>, b:Null<String>) : Bool {
+		if( a == null || b == null ) return false;
+		return js.node.Path.resolve(a) == js.node.Path.resolve(b);
+	}
+
 	function reloadGeneratedProject(path:String) {
-		var editor = activeEditor();
-		if( editor == null ) {
-			// No Editor page (eg. Home): open the project like LDtk does
-			App.ME.loadProject(path, null, (p)-> setStatus(p != null ? "ready" : "error") );
+		// The user may have switched or closed projects while the server was working:
+		// the file is saved either way, but only the project it belongs to is reloaded.
+		if( !samePath(currentProjectPath(), path) ) {
+			var parts = path.split("/");
+			var shortPath = parts.slice(-2).join("/");
+			appendMsg("ai", 'Saved ${esc(shortPath)}. It was not opened because another project is open now.');
+			setStatus("ready");
 			return;
 		}
+		var editor = activeEditor();
 
 		// Swap the project inside the open Editor, as LastChance does. Re-opening it
 		// with App.loadProject() would replace the Editor page with a new one, and the
