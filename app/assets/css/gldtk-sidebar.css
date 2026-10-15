@@ -27,6 +27,8 @@
 }
 #gldtk-toggle:hover,
 #gldtk-toggle.open { background: #e34d00; color: #fff; }
+/* open: sit on the sidebar's left edge instead of covering its content */
+#gldtk-toggle.open { right: 302px; }
 
 /* ── Sidebar shell ──────────────────────────────────────────────────────── */
 #gldtk-root {

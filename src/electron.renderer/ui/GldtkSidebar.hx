@@ -121,6 +121,7 @@ class GldtkSidebar {
 	function buildDom() {
 		jToggle = new J('<button id="gldtk-toggle">AI</button>');
 		jToggle.click( _-> toggleCollapse() );
+		jToggle.toggleClass("open", !collapsed);
 		new J("body").append(jToggle);
 
 		var providerOpts = PROVIDERS.map( p->'<option value="$p">$p</option>' ).join("");
