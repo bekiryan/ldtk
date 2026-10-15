@@ -26,6 +26,13 @@ class GldtkSidebar {
 	static inline var EDIT_KEY     = "gldtk_edit_open";
 	static inline var MODE_KEY     = "gldtk_edit_mode";
 	static inline var ROUTE_KEY    = "gldtk_route_on";
+	static inline var OPTS_KEY     = "gldtk_opts_open";
+	static inline var CX_KEY       = "gldtk_complexity";     // "auto" or 1..10
+	static inline var CX_SEC_KEY   = "gldtk_complexity_sec";
+	static inline var FILL_KEY     = "gldtk_fill";          // "off" or 0..100 (percent)
+	static inline var PATTERNS_KEY = "gldtk_patterns";      // "" (off) or 1..5
+	static inline var CHUNKS_KEY   = "gldtk_chunks";
+	static inline var CHUNK_THEME_KEY = "gldtk_chunk_theme";
 	static inline var ROUTE_DEBOUNCE_MS = 800;
 	static inline var DIFF_DEBOUNCE_MS = 800;
 	static inline var PROGRESS_POLL_MS  = 1000;
@@ -144,6 +151,9 @@ class GldtkSidebar {
 	var jLevelBox         : J;
 	var jLevelList        : J;
 	var jLevelEditing     : J;
+	var jOptsHead         : J;
+	var jOpts             : J;
+	var jOptsNote         : J;
 
 	// Live progress + Cancel (v3 Part 14)
 	var job : Null<GldtkJob>;                  // the running generate / edit / locate
@@ -279,6 +289,12 @@ class GldtkSidebar {
 							${STRUCTURES.map( t->'<option value="$t">Make this section a $t</option>' ).join("")}
 						</select>
 					</div>
+					<div class="g-opt-row" data-modes="section" title="Difficulty target of this section (Auto leaves it as it is)">
+						<span class="g-opt-label">Difficulty</span>
+						<input type="range" id="g-cx-sec" min="1" max="10" step="1" value="5"/>
+						<span class="g-opt-val" id="g-cx-sec-val"></span>
+						<label class="g-opt-off"><input type="checkbox" id="g-cx-sec-auto"/>Auto</label>
+					</div>
 					<div class="g-field" data-modes="describe">
 						<input id="g-loc" type="text" placeholder="Where? eg. the gap before the boss"/>
 					</div>
@@ -310,6 +326,40 @@ class GldtkSidebar {
 				<div class="g-field">
 					<textarea id="g-prompt" rows="4"
 					          placeholder="Describe the level… (Ctrl+Enter to generate)"></textarea>
+				</div>
+
+				<div class="g-fold-head" id="g-opts-head">
+					<span class="g-caret"></span>GENERATION OPTIONS
+					<span class="g-hint" id="g-opts-note"></span>
+				</div>
+				<div class="g-opts" id="g-opts">
+					<div class="g-opt-row" title="How intricate the level should be (Auto lets the prompt decide)">
+						<span class="g-opt-label">Difficulty</span>
+						<input type="range" id="g-cx" min="1" max="10" step="1" value="5"/>
+						<span class="g-opt-val" id="g-cx-val"></span>
+						<label class="g-opt-off"><input type="checkbox" id="g-cx-auto"/>Auto</label>
+					</div>
+					<div class="g-opt-row" title="Fill empty space with noise-shaped rock">
+						<span class="g-opt-label">Rock fill</span>
+						<input type="range" id="g-fill" min="5" max="100" step="5" value="40"/>
+						<span class="g-opt-val" id="g-fill-val"></span>
+						<label class="g-opt-off"><input type="checkbox" id="g-fill-off"/>Off</label>
+					</div>
+					<div class="g-opt-row" title="Show the model this many similar levels from your pattern library">
+						<span class="g-opt-label">Examples</span>
+						<select id="g-patterns">
+							<option value="">Examples from library: Off</option>
+							${[1,2,3,4,5].map( n->'<option value="$n">Examples from library: $n</option>' ).join("")}
+						</select>
+					</div>
+					<div class="g-opt-row" title="Append new endless chunks to the open world file">
+						<span class="g-opt-label">Chunks</span>
+						<input type="number" id="g-chunks-n" min="1" max="10" value="3" class="g-opt-num"/>
+						<input type="text" id="g-chunks-theme" placeholder="theme (optional)"/>
+					</div>
+					<div class="g-opt-row">
+						<button id="g-chunks-btn" class="g-small-btn g-opt-wide">Generate next chunks</button>
+					</div>
 				</div>
 
 				<div class="g-field g-gen-row">
@@ -344,6 +394,11 @@ class GldtkSidebar {
 		jProgMsg  = jRoot.find("#g-prog-msg");
 		jProgTime = jRoot.find("#g-prog-time");
 		jProgLog  = jRoot.find("#g-prog-log");
+
+		jOptsHead    = jRoot.find("#g-opts-head");
+		jOpts        = jRoot.find("#g-opts");
+		jOptsNote    = jRoot.find("#g-opts-note");
+		bindOptions();
 
 		jLevels      = jRoot.find("#g-levels");
 		jLevelBox    = jRoot.find("#g-level-box");
@@ -566,6 +621,7 @@ class GldtkSidebar {
 		var mode = loadStr(MODE_KEY);
 		setEditMode( mode != null && EDIT_MODES.filter( m->m.id == mode ).length > 0 ? mode : EDIT_MODES[0].id );
 		setEditOpen( loadStr(EDIT_KEY) != "0" );
+		restoreOptions();
 		jRouteOn.prop("checked", loadStr(ROUTE_KEY) != "0");
 		refreshFileRow();
 	}
@@ -660,6 +716,152 @@ class GldtkSidebar {
 		else
 			refreshEditButton();
 		refreshUndo();
+	}
+
+	// ── Generation options (v4) ───────────────────────────────────────────
+
+	/** A slider with an Auto / Off checkbox: the slider is disabled while the box is checked. **/
+	function bindSlider(sliderId:String, offId:String, valId:String, key:String, offValue:String, fmt:String->String) {
+		var jS = jRoot.find("#" + sliderId);
+		var jOff = jRoot.find("#" + offId);
+		var jVal = jRoot.find("#" + valId);
+		function refresh() {
+			var off = jOff.prop("checked") == true;
+			jS.prop("disabled", off);
+			jVal.text( off ? offValue : fmt(jS.val()) );
+		}
+		function save() {
+			saveStr(key, jOff.prop("checked") == true ? offValue.toLowerCase() : Std.string(jS.val()));
+			refresh();
+			refreshOptsNote();
+		}
+		var saved = loadStr(key);
+		if( saved != null && saved != "" && saved != "auto" && saved != "off" )
+			jS.val(saved);
+		jOff.prop("checked", saved == null ? key == FILL_KEY : saved == "auto" || saved == "off");
+		jS.on("input", _-> save());
+		jOff.change( _-> save() );
+		refresh();
+	}
+
+	function bindOptions() {
+		bindSlider("g-cx", "g-cx-auto", "g-cx-val", CX_KEY, "Auto", v->v);
+		bindSlider("g-cx-sec", "g-cx-sec-auto", "g-cx-sec-val", CX_SEC_KEY, "Auto", v->v);
+		bindSlider("g-fill", "g-fill-off", "g-fill-val", FILL_KEY, "Off", v->v + "%");
+		var jPat = jRoot.find("#g-patterns");
+		var jN = jRoot.find("#g-chunks-n");
+		var jTheme = jRoot.find("#g-chunks-theme");
+		var pat = loadStr(PATTERNS_KEY);
+		if( pat != null ) jPat.val(pat);
+		var n = loadStr(CHUNKS_KEY);
+		if( n != null ) jN.val(n);
+		var th = loadStr(CHUNK_THEME_KEY);
+		if( th != null ) jTheme.val(th);
+		jPat.change( _-> { saveStr(PATTERNS_KEY, jPat.val()); refreshOptsNote(); } );
+		jN.on("input", _-> saveStr(CHUNKS_KEY, jN.val()) );
+		jTheme.on("input", _-> saveStr(CHUNK_THEME_KEY, jTheme.val()) );
+		jRoot.find("#g-chunks-btn").click( _-> if( !busy ) generateChunks() );
+		jOptsHead.click( _-> setOptsOpen( !jOptsHead.hasClass("open") ) );
+	}
+
+	function restoreOptions() {
+		setOptsOpen( loadStr(OPTS_KEY) == "1" );
+	}
+
+	function setOptsOpen(open:Bool) {
+		jOptsHead.toggleClass("open", open);
+		jOpts.css("display", open ? "block" : "none"); // toggle() cannot tell while the sidebar is hidden
+		saveStr(OPTS_KEY, open ? "1" : "0");
+		refreshOptsNote();
+	}
+
+	/** The collapsed header summarises what is set. **/
+	function refreshOptsNote() {
+		var parts = [];
+		var cx = complexityValue("g-cx");
+		if( cx != null ) parts.push( "difficulty " + jRoot.find("#g-cx").val() );
+		var fill = fillValue();
+		if( fill != null ) parts.push( "fill " + jRoot.find("#g-fill").val() + "%" );
+		var pat = patternsValue();
+		if( pat != null ) parts.push( "examples " + pat );
+		jOptsNote.text( parts.length == 0 ? "" : parts.join(" · ") );
+	}
+
+	/** Slider 1..10 -> 0..1, or null while Auto is checked. **/
+	function complexityValue(sliderId:String) : Null<Float> {
+		if( jRoot.find("#" + sliderId + "-auto").prop("checked") == true ) return null;
+		var n = Std.parseFloat( jRoot.find("#" + sliderId).val() );
+		return Math.isNaN(n) ? null : Math.round((n - 1) / 9 * 10000) / 10000;
+	}
+
+	function fillValue() : Null<Float> {
+		if( jRoot.find("#g-fill-off").prop("checked") == true ) return null;
+		var n = Std.parseFloat( jRoot.find("#g-fill").val() );
+		return Math.isNaN(n) ? null : n / 100;
+	}
+
+	function patternsValue() : Null<Int> {
+		var v : String = jRoot.find("#g-patterns").val();
+		return v == null || v == "" ? null : Std.parseInt(v);
+	}
+
+	/** Adds the options every generation / edit request carries (null = off, so the field is left out). **/
+	function addOptions(payload:Dynamic, ?complexityId:String) {
+		var cx = complexityId != null ? complexityValue(complexityId) : null;
+		if( cx != null ) payload.complexity = cx;
+		var fill = fillValue();
+		if( fill != null ) payload.fill = fill;
+		var pat = patternsValue();
+		if( pat != null ) payload.patterns = pat;
+	}
+
+	/** POST /chunks: appends endless chunks to the open world file, then reloads it. **/
+	function generateChunks() {
+		var path = editTargetPath();
+		if( path == null ) return;
+		var n = Std.parseInt( jRoot.find("#g-chunks-n").val() );
+		if( n == null || n < 1 ) n = 1;
+		if( n > 10 ) n = 10;
+		var theme = StringTools.trim( jRoot.find("#g-chunks-theme").val() );
+		var payload : Dynamic = { path: path, count: n, seed: Std.int( Math.random() * 100000 ), orientation: "horizontal" };
+		if( theme.length > 0 ) payload.theme = theme;
+		appendMsg("user", '<span class="g-meta">&#x21E5; Chunks</span>Generate next $n chunk${n == 1 ? "" : "s"}${theme.length > 0 ? " (" + esc(theme) + ")" : ""}');
+		saveFirst( ()-> {
+			setBusy(true);
+			setStatus("working…");
+			jRoot.find("#g-chunks-btn").prop("disabled", true).text("working…");
+			function done() {
+				jRoot.find("#g-chunks-btn").prop("disabled", false).text("Generate next chunks");
+				setBusy(false);
+			}
+			request("POST", "/chunks", payload, (status, res)-> {
+				done();
+				if( status != 200 || res == null || res.success == false ) {
+					appendMsg("err", esc(errorText(status, res)));
+					setStatus("error");
+					return;
+				}
+				var cs : Array<Dynamic> = res.chunks != null ? res.chunks : [];
+				var ids = cs.map( c->Std.string(c.identifier) );
+				var unverified = cs.filter( c->c.verified != true ).length;
+				var warnings : Array<String> = res.warnings != null ? res.warnings : [];
+				var warnHtml = warnings.length == 0 ? "" :
+					'<details class="g-fold"><summary>${warnings.length} warning${warnings.length > 1 ? "s" : ""}</summary>' +
+					'<ul class="g-warn-list">' + warnings.map( w->'<li>${esc(w)}</li>' ).join("") + '</ul></details>';
+				var writtenPath : String = res.output_path != null ? res.output_path : path;
+				appendMsg("ai",
+					'<span class="g-meta">${cs.length} chunk${cs.length == 1 ? "" : "s"} added · ${esc(ids.join(", "))}' +
+					( unverified > 0 ? ' · <span class="g-route-lost">$unverified not verified</span>' : " · beatable" ) + '</span>' +
+					warnHtml + '<span class="g-ok">&#x2713; Saved ${esc(writtenPath.split("/").pop())}</span>');
+				fullReload = true;
+				setStatus("reloading…");
+				haxe.Timer.delay( ()-> reloadGeneratedProject(writtenPath), 400 );
+			}, ()-> {
+				done();
+				appendMsg("err", "Cannot reach GLDtk server — is <code>python server.py</code> running?");
+				setStatus("offline");
+			});
+		});
 	}
 
 	// ── Design memory ─────────────────────────────────────────────────────
@@ -1136,6 +1338,7 @@ class GldtkSidebar {
 		var lv = curLevelIid();
 		if( lv != null )
 			payload.level = lv;
+		addOptions(payload); // fill + examples; complexity only on a section edit
 		return payload;
 	}
 
@@ -1204,6 +1407,8 @@ class GldtkSidebar {
 					return;
 				}
 				payload.section_id = s.id;
+				var cx = complexityValue("g-cx-sec");
+				if( cx != null ) payload.complexity = cx;
 				postEdit("/edit/section", payload, 'Section ${s.name != null ? s.name : s.id}', prompt);
 
 			case "entities":
@@ -1546,6 +1751,9 @@ class GldtkSidebar {
 		var lost : Array<Dynamic> = route.unreachable_required != null ? route.unreachable_required : [];
 		if( lost.length > 0 )
 			html += ' <span class="g-route-lost">· ${lost.length} required entit${lost.length == 1 ? "y" : "ies"} unreachable</span>';
+		var stuck : Array<Dynamic> = route.softlock_spans != null ? route.softlock_spans : [];
+		if( stuck.length > 0 )
+			html += ' <span class="g-route-lost">· ${stuck.length} stuck spot${stuck.length == 1 ? "" : "s"}</span>';
 		jRouteSum.html(html);
 	}
 
@@ -1889,6 +2097,7 @@ class GldtkSidebar {
 		var model = StringTools.trim( jModel.val() );
 		if( model.length > 0 )
 			Reflect.setField(payload, "model", model);
+		addOptions(payload, "g-cx");
 		if( regenLevel != null )
 			payload.level = regenLevel;
 		else if( jLevels.val() != "" )
@@ -1958,13 +2167,46 @@ class GldtkSidebar {
 			header +
 			'<span class="g-meta">${esc(themeStr)} · $nodes nodes · $edges edges · $verified · ${etParts.join(" ")}</span>' +
 			worldHtml(res.world) +
+			patternsHtml(res.patterns_used) +
 			fidelityHtml(res.fidelity) +
+			missionHtml(res.mission) +
 			warnHtml +
 			ascii +
 			'<span class="g-ok">&#x2713; Saved ${esc(writtenPath.split("/").pop())}</span>'
 		);
 		setStatus("reloading…");
 		haxe.Timer.delay( ()-> reloadGeneratedProject(writtenPath), 400 );
+	}
+
+	static function patternsHtml(used:Null<Array<Dynamic>>) : String {
+		if( used == null || used.length == 0 ) return "";
+		return '<span class="g-meta g-patterns-used">Examples used: ${used.map( p->esc(p.title != null ? p.title : p.id) ).join(" · ")}</span>';
+	}
+
+	/** v4 Part 23: keys -> locks, gates, loops and the other goals, each with its check. **/
+	static function missionHtml(m:Null<Dynamic>) : String {
+		if( m == null ) return "";
+		var feats : Array<Dynamic> = m.features != null ? m.features : [];
+		var nodes : Array<Dynamic> = m.nodes != null ? m.nodes : [];
+		var rows = new StringBuf();
+		for( f in feats ) {
+			var ok = f.ok == true;
+			var what = switch Std.string(f.kind) {
+				case "lock": 'Key ${f.key != null ? esc(f.key) : "?"} &rarr; lock ${f.lock != null ? esc(f.lock) : "?"}';
+				case "gate": 'Gate needs ${esc(f.ability)}' + ( f.pickup != null ? ' (pickup ${esc(f.pickup)})' : "" );
+				case "loop": 'Loop: shortcut ${f.door != null ? esc(f.door) : ""} &rarr; hub';
+				case k: esc(k.charAt(0).toUpperCase() + k.substr(1)) + ( f.entity != null ? ' ${esc(f.entity)}' : "" );
+			};
+			rows.add('<li class="g-mis-${ok ? "ok" : "bad"}"><span class="g-mis-icon">${ok ? "&#x2713;" : "&#x2717;"}</span>$what' +
+				( f.reason != null ? '<span class="g-mis-reason">${esc(f.reason)}</span>' : "" ) + '</li>');
+		}
+		var rules : Array<Dynamic> = m.rules != null ? m.rules : [];
+		var realised = m.realised == true;
+		return '<details class="g-fold g-mission"><summary>Mission &middot; ${nodes.length} goals &middot; ' +
+			'<span class="${realised ? "g-mis-ok" : "g-mis-bad"}">${realised ? "realised" : "not fully realised"}</span></summary>' +
+			'<ul class="g-mis-list">${rows.toString()}</ul>' +
+			( rules.length > 0 ? '<div class="g-mis-rules">Rules: ${rules.map( r->esc(r) ).join(", ")}</div>' : "" ) +
+			'</details>';
 	}
 
 	static function statusIcon(status:String) : String {

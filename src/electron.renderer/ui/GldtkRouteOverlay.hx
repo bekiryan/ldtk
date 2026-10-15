@@ -19,6 +19,7 @@ class GldtkRouteOverlay {
 	static inline var WALL_COLOR   = 0xb58cff;
 	static inline var REACH_COLOR  = 0x4dff88;
 	static inline var RING_COLOR   = 0xff3b3b;
+	static inline var STUCK_COLOR  = 0xff2a2a;
 
 	var g : Null<h2d.Graphics>;
 
@@ -78,6 +79,18 @@ class GldtkRouteOverlay {
 			g.endFill();
 			g.beginFill(REACH_COLOR, 0.5);
 			g.drawRect(x, y - M.fmax(1, 1.5*px), w, M.fmax(1, 1.5*px));
+			g.endFill();
+		}
+
+		// Soft-locks: spans where the player gets stuck, shaded red over the reachable shading
+		var stuck : Array<Dynamic> = route.softlock_spans != null ? route.softlock_spans : [];
+		for( s in stuck ) {
+			var x = s.col*gridSize, y = s.row*gridSize, w = s.w*gridSize;
+			g.beginFill(STUCK_COLOR, 0.3);
+			g.drawRect(x, y-gridSize, w, gridSize);
+			g.endFill();
+			g.beginFill(STUCK_COLOR, 0.85);
+			g.drawRect(x, y - M.fmax(1, 2*px), w, M.fmax(1, 2*px));
 			g.endFill();
 		}
 
