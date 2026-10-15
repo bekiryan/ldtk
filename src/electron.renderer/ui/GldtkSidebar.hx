@@ -15,7 +15,7 @@ typedef GldtkJob = { id:String, startedAt:Float, timer:Null<haxe.Timer>, polling
 **/
 class GldtkSidebar {
 
-	static inline var SERVER       = "http://127.0.0.1:8765";
+	static var SERVER       = "http://127.0.0.1:" + (js.Node.process.env.exists("GLDTK_PORT") ? js.Node.process.env.get("GLDTK_PORT") : "8765"); // set by the main process in the packaged app
 	static inline var HIST_KEY     = "gldtk_history";
 	static inline var PROVIDER_KEY = "gldtk_provider";
 	static inline var MODEL_KEY    = "gldtk_model";
@@ -146,7 +146,31 @@ class GldtkSidebar {
 		restoreState();
 		restoreHistory();
 		loadProviders();
+		loadSettings();
 		onProjectChanged();
+	}
+
+	/** First launch of the packaged app: no Gemini key yet, so show the key form. **/
+	function loadSettings() {
+		var jBox = jRoot.find("#g-key-box");
+		var jKey = jRoot.find("#g-key");
+		var jMsg = jRoot.find("#g-key-msg");
+		jRoot.find("#g-key-save").click( (_)->{
+			var key = StringTools.trim( jKey.val() );
+			if( key == "" ) return;
+			request("POST", "/settings", { gemini_api_key:key }, (status, res)->{
+				if( status == 200 && res != null && res.has_key ) {
+					jKey.val("");
+					jBox.hide();
+				}
+				else
+					jMsg.text("Could not save the key");
+			}, ()->jMsg.text("server offline") );
+		});
+		request("GET", "/settings", null, (status, res)->{
+			if( status == 200 && res != null && !res.has_key )
+				jBox.show();
+		}, ()->{} );
 	}
 
 	// ── CSS ───────────────────────────────────────────────────────────────
@@ -256,6 +280,12 @@ class GldtkSidebar {
 				<div class="g-field g-provider-row">
 					<select id="g-provider">$providerOpts</select>
 					<input id="g-model" type="text" placeholder="default model"/>
+				</div>
+				<div class="g-field" id="g-key-box" style="display:none">
+					<div>Add your Gemini API key</div>
+					<input id="g-key" type="password" placeholder="Gemini API key" autocomplete="off"/>
+					<button id="g-key-save">Save key</button>
+					<div id="g-key-msg"></div>
 				</div>
 
 				<div class="g-section">PROMPT</div>

@@ -1,6 +1,8 @@
 {
-	"appId": "com.deepnight.ldtk",
-	"artifactName": "${productName} ${version} installer.${ext}",
+	"appId": "com.gldtk.app",
+	"productName": "GLDtk",
+	"copyright": "GLDtk is built on LDtk by Sebastien Benard (deepnight), MIT licence",
+	"artifactName": "${productName}-${version}-${arch}.${ext}",
 
 	"directories": {
 		"buildResources": "buildAssets",
@@ -49,5 +51,16 @@
 		"publish": ["github"]
 	},
 
-	"mac": {}
+	"extraResources": [
+		{
+			"from": "../../packaging/dist/gldtk-server",
+			"to": "gldtk-server"
+		}
+	],
+
+	"mac": {
+		"category": "public.app-category.developer-tools",
+		"identity": null,
+		"target": [ "dmg" ]
+	}
 }

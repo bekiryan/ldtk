@@ -55,7 +55,7 @@ class PlayEntity {
 	shows the time and pickups.
 **/
 class GldtkPlay {
-	static inline var SERVER = "http://127.0.0.1:8765";
+	static var SERVER = "http://127.0.0.1:" + (js.Node.process.env.exists("GLDTK_PORT") ? js.Node.process.env.get("GLDTK_PORT") : "8765"); // set by the main process in the packaged app
 	static inline var GHOST_KEY = "gldtk_play_ghost";
 	static inline var LIVES = 3;
 	static inline var INVULNERABLE_S = 1.0;
