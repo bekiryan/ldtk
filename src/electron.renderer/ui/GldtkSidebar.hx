@@ -4,6 +4,7 @@ typedef ProfileField = { path:String, label:String, ?bool:Bool }
 typedef ProfileGroup = { title:String, ?toggle:String, fields:Array<ProfileField> }
 typedef EditMode = { id:String, label:String, action:String }
 typedef GldtkRect = tool.GldtkAreaTool.GldtkRect
+typedef GldtkJob = { id:String, startedAt:Float, timer:Null<haxe.Timer>, polling:Bool, cancelling:Bool }
 
 /**
   GLDtk sidebar — persistent right-hand panel, styled to match LDtk's
@@ -23,6 +24,7 @@ class GldtkSidebar {
 	static inline var MODE_KEY     = "gldtk_edit_mode";
 	static inline var ROUTE_KEY    = "gldtk_route_on";
 	static inline var ROUTE_DEBOUNCE_MS = 800;
+	static inline var PROGRESS_POLL_MS  = 1000;
 
 	// Overlay colours on the level canvas
 	static inline var AREA_COLOR    = 0xffcc00;
@@ -87,6 +89,10 @@ class GldtkSidebar {
 	var jUndo      : J;
 	var jRouteOn   : J;
 	var jRouteSum  : J;
+	var jProgress  : J;
+	var jProgMsg   : J;
+	var jProgTime  : J;
+	var jProgLog   : J;
 	var collapsed  : Bool   = false;
 	var busy       : Bool   = false;
 
@@ -111,6 +117,9 @@ class GldtkSidebar {
 	var routeSeq          = 0;                 // bumped to drop stale /route answers
 	var routeTimer        : Null<haxe.Timer>;  // debounced refetch
 	var routeFromResponse = false;             // `route` came with a result: the reload needs no refetch
+
+	// Live progress + Cancel (v3 Part 14)
+	var job : Null<GldtkJob>;                  // the running generate / edit / locate
 
 	public function new() {
 		injectCss();
@@ -145,6 +154,17 @@ class GldtkSidebar {
 				<span class="g-title">GLDtk</span>
 				<span class="g-status" id="g-status">ready</span>
 				<button class="g-clear" id="g-clear" title="Clear the chat history">clear</button>
+			</div>
+
+			<div class="g-progress" id="g-progress">
+				<div class="g-prog-line">
+					<span class="g-prog-msg" id="g-prog-msg"></span>
+					<span class="g-prog-time" id="g-prog-time"></span>
+				</div>
+				<details class="g-prog-fold">
+					<summary>Log</summary>
+					<ol class="g-prog-log" id="g-prog-log"></ol>
+				</details>
 			</div>
 
 			<div class="g-history" id="g-history"></div>
@@ -233,12 +253,18 @@ class GldtkSidebar {
 		jProf     = jRoot.find("#g-prof");
 		jProfErr  = jRoot.find("#g-prof-err");
 
-		jBtn.click( _-> if( !busy ) generate() );
+		jProgress = jRoot.find("#g-progress");
+		jProgMsg  = jRoot.find("#g-prog-msg");
+		jProgTime = jRoot.find("#g-prog-time");
+		jProgLog  = jRoot.find("#g-prog-log");
+
+		jBtn.click( _-> if( job != null ) cancelJob() else if( !busy ) generate() );
 		jRoot.find("#g-clear").click( _-> clearHistory() );
 
 		jPrompt.on("keydown", function(ev:js.jquery.Event) {
 			var ke : js.html.KeyboardEvent = cast Reflect.field(ev, "originalEvent");
-			if( ke != null && ke.key == "Enter" && (ke.ctrlKey || ke.metaKey) ) generate();
+			if( ke != null && ke.key == "Enter" && (ke.ctrlKey || ke.metaKey) && !busy ) generate();
+			if( ke != null && ke.key == "Escape" && job != null ) { ev.preventDefault(); cancelJob(); }
 		});
 
 		jProvider.change( _-> {
@@ -271,7 +297,7 @@ class GldtkSidebar {
 		jAreaBtn.click( _-> startAreaSelection() );
 		jRoot.find("#g-area-clear").click( _-> { area = null; refreshTarget(); drawOverlay(); } );
 		jSection.change( _-> { refreshTarget(); drawOverlay(); bleepRect(selectedSectionRect(), SECTION_COLOR); } );
-		jEditBtn.click( _-> if( !busy ) applyEdit() );
+		jEditBtn.click( _-> if( job != null ) cancelJob() else if( !busy ) applyEdit() );
 		jUndo.click( _-> if( !busy ) undo() );
 		jRouteOn.change( _-> {
 			saveStr(ROUTE_KEY, jRouteOn.prop("checked") ? "1" : "0");
@@ -280,10 +306,12 @@ class GldtkSidebar {
 		jEditPrompt.on("keydown", function(ev:js.jquery.Event) {
 			var ke : js.html.KeyboardEvent = cast Reflect.field(ev, "originalEvent");
 			if( ke != null && ke.key == "Enter" && (ke.ctrlKey || ke.metaKey) && !busy ) applyEdit();
+			if( ke != null && ke.key == "Escape" && job != null ) { ev.preventDefault(); cancelJob(); }
 		});
 		jLocText.on("keydown", function(ev:js.jquery.Event) {
 			var ke : js.html.KeyboardEvent = cast Reflect.field(ev, "originalEvent");
 			if( ke != null && ke.key == "Enter" && !busy ) locate();
+			if( ke != null && ke.key == "Escape" && job != null ) { ev.preventDefault(); cancelJob(); }
 		});
 	}
 
@@ -331,6 +359,8 @@ class GldtkSidebar {
 		var editor = activeEditor();
 		if( editor != null )
 			editor.ge.addGlobalListener(onEditorEvent);
+		else
+			stopPolling(); // project closed: the request still answers, but nobody watches it
 		onProjectChanged();
 		clearRoute();
 		scheduleRouteFetch();
@@ -486,15 +516,23 @@ class GldtkSidebar {
 		persistHistory();
 	}
 
-	/** `editing`: the edit panel started the request (its button shows the progress). **/
+	/**
+		`editing`: the edit panel started the request (its button shows the progress).
+		With a running job, that button turns into Cancel.
+	**/
 	function setBusy(b:Bool, editing=false) {
 		busy = b;
-		jBtn.prop("disabled", b);
-		jBtn.html( b && !editing ? "Generating…" : "&#x25B6;&nbsp; Generate" );
-		jEditBtn.prop("disabled", b);
+		var cancel = b && job != null;
+		jBtn.prop("disabled", b && (editing || !cancel));
+		jBtn.toggleClass("g-cancel", cancel && !editing);
+		jBtn.html( b && !editing ? (cancel ? "&#x25A0;&nbsp; Cancel" : "Generating…") : "&#x25B6;&nbsp; Generate" );
+		jEditBtn.prop("disabled", b && !(editing && cancel));
+		jEditBtn.toggleClass("g-cancel", cancel && editing);
 		jLocated.find("button").prop("disabled", b);
-		if( b && editing )
-			jEditBtn.text("Working…");
+		if( b && editing ) {
+			jEditBtn.show(); // also while "Apply here" runs (it hides the button)
+			jEditBtn.html( cancel ? "&#x25A0;&nbsp; Cancel" : "Working…" );
+		}
 		else
 			refreshEditButton();
 		refreshUndo();
@@ -956,23 +994,31 @@ class GldtkSidebar {
 	}
 
 	function sendEdit(route:String, payload:Dynamic, label:String, ?onDone:Void->Void) {
+		payload.job_id = startJob();
 		setBusy(true, true);
 		setStatus("editing…");
 		var path : String = payload.path;
 		request("POST", route, payload, (status, res)-> {
+			var cancelling = endJob();
 			setBusy(false);
+			if( status == 200 && res != null && res.cancelled == true ) {
+				onCancelled();
+				return;
+			}
 			if( status != 200 || res == null || res.success == false ) {
 				appendMsg("err", esc(errorText(status, res)) + '<span class="g-meta g-unchanged">The level was not changed.</span>');
 				setStatus("error");
 				return;
 			}
 			if( onDone != null ) onDone();
+			if( cancelling ) noteTooLate();
 			var e : Dynamic = res.edit;
 			var region : Dynamic = e != null ? e.region : null;
 			var header = '<span class="g-meta g-edit-meta">&#x270E; ${esc(label)}' +
 				( region != null && region.w != null && label.indexOf(rectStr(region)) < 0 ? ' · ${esc(rectStr(region))}' : "" ) + '</span>';
 			onSuccess(res, path, header);
 		}, ()-> {
+			endJob();
 			setBusy(false);
 			appendMsg("err", "Cannot reach GLDtk server — is <code>python server.py</code> running?");
 			setStatus("offline");
@@ -1016,10 +1062,16 @@ class GldtkSidebar {
 	}
 
 	function sendLocate(path:String, payload:Dynamic) {
+		payload.job_id = startJob();
 		setBusy(true, true);
 		setStatus("locating…");
 		request("POST", "/edit/locate", payload, (status, res)-> {
+			endJob();
 			setBusy(false);
+			if( status == 200 && res != null && res.cancelled == true ) {
+				onCancelled();
+				return;
+			}
 			var r : Dynamic = res != null ? res.rect : null;
 			if( status != 200 || res == null || res.success == false || r == null || r.w == null ) {
 				appendMsg("err", esc(errorText(status, res)));
@@ -1038,6 +1090,7 @@ class GldtkSidebar {
 			drawOverlay();
 			bleepRect(located.rect, LOCATE_COLOR);
 		}, ()-> {
+			endJob();
 			setBusy(false);
 			appendMsg("err", "Cannot reach GLDtk server — is <code>python server.py</code> running?");
 			setStatus("offline");
@@ -1243,6 +1296,94 @@ class GldtkSidebar {
 		routeOverlay.draw(route, editor.curLevel, li.def.gridSize);
 	}
 
+	// ── Live progress + Cancel (v3 Part 14) ───────────────────────────────
+
+	static function newJobId() : String {
+		var crypto : Dynamic = untyped js.Browser.window.crypto;
+		if( crypto != null && crypto.randomUUID != null )
+			return crypto.randomUUID();
+		return [ for( _ in 0...4 ) StringTools.hex(Std.random(0x10000), 4) + StringTools.hex(Std.random(0x10000), 4) ].join("-");
+	}
+
+	/** A new job id for the next request; polls `/progress` until `endJob()`. **/
+	function startJob() : String {
+		endJob();
+		var j : GldtkJob = { id: newJobId(), startedAt: haxe.Timer.stamp(), timer: new haxe.Timer(PROGRESS_POLL_MS), polling: false, cancelling: false };
+		job = j;
+		j.timer.run = ()-> pollProgress(j);
+		jProgMsg.text("Sending the request…");
+		jProgLog.empty();
+		jProgress.addClass("on");
+		tickElapsed();
+		return j.id;
+	}
+
+	/** Stops polling and hides the progress; returns whether Cancel had been pressed. **/
+	function endJob() : Bool {
+		if( job == null ) return false;
+		var cancelling = job.cancelling;
+		stopPolling();
+		job = null;
+		jProgress.removeClass("on");
+		return cancelling;
+	}
+
+	function stopPolling() {
+		if( job != null && job.timer != null ) {
+			job.timer.stop();
+			job.timer = null;
+		}
+	}
+
+	function tickElapsed() {
+		if( job == null ) return;
+		var s = Std.int( haxe.Timer.stamp() - job.startedAt );
+		jProgTime.text( '${Std.int(s / 60)}:${StringTools.lpad(Std.string(s % 60), "0", 2)}' );
+	}
+
+	function pollProgress(j:GldtkJob) {
+		if( job != j ) return;
+		tickElapsed();
+		if( j.polling ) return; // the previous poll has not answered yet
+		j.polling = true;
+		request("GET", "/progress?job=" + StringTools.urlEncode(j.id), null, (status, res)-> {
+			j.polling = false;
+			if( job != j || status != 200 || res == null ) return;
+			var events : Array<Dynamic> = res.events != null ? res.events : [];
+			if( events.length == 0 ) return;
+			if( !j.cancelling )
+				jProgMsg.text( Std.string(events[events.length-1].message) );
+			jProgLog.html( events.map( e->'<li><span class="g-prog-t">${fmtSeconds(e.t)}</span>${esc(e.message)}</li>' ).join("") );
+		}, ()-> j.polling = false );
+	}
+
+	static function fmtSeconds(t:Dynamic) : String {
+		var s = Std.int( t != null ? (t:Float) : 0 );
+		return '${Std.int(s / 60)}:${StringTools.lpad(Std.string(s % 60), "0", 2)}';
+	}
+
+	/** Cancel button / Esc: the server stops at its next checkpoint and writes nothing. **/
+	function cancelJob() {
+		var j = job;
+		if( j == null || j.cancelling ) return;
+		j.cancelling = true;
+		jProgMsg.text("Cancelling… (waits for the current LLM call to return)");
+		jBtn.prop("disabled", true);
+		jEditBtn.prop("disabled", true);
+		setStatus("cancelling…");
+		request("POST", "/cancel", { job_id: j.id }, (_, _)->{}, ()->{} );
+	}
+
+	function onCancelled() {
+		appendMsg("ai", '<span class="g-meta g-edit-meta">&#x25A0; Cancelled</span>Cancelled. Nothing was changed.');
+		setStatus("cancelled");
+	}
+
+	/** Cancel was pressed, but the result was already being written. **/
+	function noteTooLate() {
+		appendMsg("ai", "It finished before the cancel arrived, so the result was kept.");
+	}
+
 	// ── Generate ──────────────────────────────────────────────────────────
 
 	function generate() {
@@ -1259,22 +1400,26 @@ class GldtkSidebar {
 
 		appendMsg("user", esc(description));
 
-		setBusy(true);
-		setStatus("generating…");
-
 		var payload : Dynamic = {
 			description: description,
 			output_path: outPath,
 			seed:        Std.int( Math.random() * 100000 ),
 			provider:    jProvider.val(),
+			job_id:      startJob(),
 		};
 		var model = StringTools.trim( jModel.val() );
 		if( model.length > 0 )
 			Reflect.setField(payload, "model", model);
 
+		setBusy(true);
+		setStatus("generating…");
+
 		request("POST", "/generate", payload, (status, res)-> {
+			var cancelling = endJob();
 			setBusy(false);
-			if( status != 200 ) {
+			if( status == 200 && res != null && res.cancelled == true )
+				onCancelled();
+			else if( status != 200 ) {
 				appendMsg("err", 'Server returned HTTP ${status}.');
 				setStatus("error");
 			}
@@ -1286,9 +1431,12 @@ class GldtkSidebar {
 				appendMsg("err", res.error != null ? esc(res.error) : "Unknown error");
 				setStatus("error");
 			}
-			else
+			else {
+				if( cancelling ) noteTooLate();
 				onSuccess(res, outPath);
+			}
 		}, ()-> {
+			endJob();
 			setBusy(false);
 			appendMsg("err", "Cannot reach GLDtk server — is <code>python server.py</code> running?");
 			setStatus("offline");

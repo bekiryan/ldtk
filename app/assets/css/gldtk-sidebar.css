@@ -83,6 +83,73 @@
 }
 #gldtk-root .g-clear:hover { color: #c1cfeb; border-color: #737f9d; }
 
+/* ── Live progress (v3 Part 14) ─────────────────────────────────────────── */
+#gldtk-root .g-progress {
+  display: none;
+  flex-shrink: 0;
+  padding: 6px 10px;
+  background: #262b35;
+  border-bottom: 1px solid #3c4455;
+}
+#gldtk-root .g-progress.on { display: block; }
+#gldtk-root .g-prog-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+#gldtk-root .g-prog-msg {
+  flex: 1;
+  min-width: 0;
+  color: #ffcc00;
+  word-break: break-word;
+}
+#gldtk-root .g-prog-msg::before {
+  content: "";
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: #ffcc00;
+  vertical-align: middle;
+  animation: g-pulse 1s ease-in-out infinite alternate;
+}
+@keyframes g-pulse { from { opacity: 1; } to { opacity: .25; } }
+#gldtk-root .g-prog-time {
+  flex-shrink: 0;
+  font-family: monospace;
+  color: #737f9d;
+}
+#gldtk-root details.g-prog-fold { margin-top: 3px; }
+#gldtk-root details.g-prog-fold > summary {
+  cursor: pointer;
+  font-size: 9px;
+  color: #737f9d;
+  text-transform: uppercase;
+  letter-spacing: .3px;
+}
+#gldtk-root .g-prog-log {
+  max-height: 120px;
+  overflow-y: auto;
+  margin: 3px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 10px;
+  color: #a0abc4;
+  user-select: text;
+  -webkit-user-select: text;
+}
+#gldtk-root .g-prog-t {
+  display: inline-block;
+  width: 34px;
+  font-family: monospace;
+  color: #545d73;
+}
+
+/* Generate / Edit turned into Cancel while a job runs */
+#gldtk-root button.g-cancel { background: #8a2a10; color: #fff; }
+#gldtk-root button.g-cancel:hover { background: #b33a16; }
+
 /* ── Chat history ───────────────────────────────────────────────────────── */
 #gldtk-root .g-history,
 #gldtk-root .g-history * {
