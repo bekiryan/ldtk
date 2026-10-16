@@ -30,6 +30,7 @@ class GldtkSidebar {
 	static inline var CX_KEY       = "gldtk_complexity";     // "auto" or 1..10
 	static inline var CX_SEC_KEY   = "gldtk_complexity_sec";
 	static inline var FILL_KEY     = "gldtk_fill";          // "off" or 0..100 (percent)
+	static inline var STAMP_KEY = "gldtk_stamp_patterns"; // "0" = off, default on (v4 Part 29a)
 	static inline var PATTERNS_KEY = "gldtk_patterns";      // "" (off) or 1..5
 	static inline var CHUNKS_KEY   = "gldtk_chunks";
 	static inline var CHUNK_THEME_KEY = "gldtk_chunk_theme";
@@ -351,6 +352,9 @@ class GldtkSidebar {
 							<option value="">Examples from library: Off</option>
 							${[1,2,3,4,5].map( n->'<option value="$n">Examples from library: $n</option>' ).join("")}
 						</select>
+					</div>
+					<div class="g-opt-row" title="Build carved sections from real level pieces in the pattern library">
+						<label class="g-opt-off"><input type="checkbox" id="g-stamp" checked="checked"/>Use real level pieces</label>
 					</div>
 					<div class="g-opt-row" title="Append new endless chunks to the open world file">
 						<span class="g-opt-label">Chunks</span>
@@ -753,6 +757,9 @@ class GldtkSidebar {
 		var jTheme = jRoot.find("#g-chunks-theme");
 		var pat = loadStr(PATTERNS_KEY);
 		if( pat != null ) jPat.val(pat);
+		var jStamp = jRoot.find("#g-stamp");
+		jStamp.prop("checked", loadStr(STAMP_KEY) != "0");
+		jStamp.change( _-> saveStr(STAMP_KEY, jStamp.prop("checked") == true ? "1" : "0") );
 		var n = loadStr(CHUNKS_KEY);
 		if( n != null ) jN.val(n);
 		var th = loadStr(CHUNK_THEME_KEY);
@@ -813,6 +820,7 @@ class GldtkSidebar {
 		if( fill != null ) payload.fill = fill;
 		var pat = patternsValue();
 		if( pat != null ) payload.patterns = pat;
+		payload.stamp_patterns = jRoot.find("#g-stamp").prop("checked") == true;
 	}
 
 	/** POST /chunks: appends endless chunks to the open world file, then reloads it. **/
@@ -2180,7 +2188,18 @@ class GldtkSidebar {
 
 	static function patternsHtml(used:Null<Array<Dynamic>>) : String {
 		if( used == null || used.length == 0 ) return "";
-		return '<span class="g-meta g-patterns-used">Examples used: ${used.map( p->esc(p.title != null ? p.title : p.id) ).join(" · ")}</span>';
+		var ex = used.filter( p->p.use != "stamped" );
+		var out = "";
+		if( ex.length > 0 )
+			out += '<span class="g-meta g-patterns-used">Examples used: ${ex.map( p->esc(p.title != null ? p.title : p.id) ).join(" · ")}</span>';
+		for( p in used.filter( p->p.use == "stamped" ) ) {
+			var t : String = Std.string(p.title != null ? p.title : p.id);
+			var src = p.source != null ? Std.string(p.source) : "";
+			var what = ( src != "" && t.indexOf(src) == -1 ) ? src + " – " + t : t;
+			var lic = p.license != null ? ' (${esc(p.license)})' : "";
+			out += '<span class="g-meta g-patterns-used">Section <i>${esc(p.section != null ? p.section : "?")}</i>: built from <i>${esc(what)}</i>$lic</span>';
+		}
+		return out;
 	}
 
 	/** v4 Part 23: keys -> locks, gates, loops and the other goals, each with its check. **/

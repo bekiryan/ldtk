@@ -84,6 +84,8 @@ class GldtkPlay {
 	var levelCanvas : js.html.CanvasElement;
 	var images : Map<Int, js.html.Image> = new Map();
 	var route : Null<Dynamic>;
+	var stuck : Array<{col:Int, row:Int, w:Int}> = []; // soft-lock spans (cells), v4 Part 29b
+	var wasStuck = false;
 
 	// Input
 	var held : Map<String,Bool> = new Map();
@@ -234,6 +236,9 @@ class GldtkPlay {
 			if( current != this || status != 200 || res == null || res.success != true ) return;
 			if( res.level_iid != null && res.level_iid != level.iid ) return;
 			route = res;
+			stuck = [];
+			var spans : Array<Dynamic> = res.softlock_spans != null ? res.softlock_spans : [];
+			for( sp in spans ) stuck.push({ col:Std.int(sp.col), row:Std.int(sp.row), w:Std.int(sp.w) });
 		}, ()->{} );
 	}
 
@@ -564,6 +569,9 @@ class GldtkPlay {
 				case _:
 			}
 		}
+		var inStuck = inStuckSpan();
+		if( inStuck && !wasStuck ) say("You are in a spot with no way to the Exit");
+		wasStuck = inStuck;
 		if( p.touches(PlayGrid.HAZARD, HAZARD_INSET) || p.y - pr.height > grid.hei * grid.ts )
 			die();
 	}
@@ -752,12 +760,29 @@ class GldtkPlay {
 		c.setTransform(scale, 0, 0, scale, ox, oy);
 		c.drawImage(levelCanvas, 0, 0);
 
+		drawStuck(c);
 		if( jGhost.prop("checked") == true ) drawGhost(c, scale);
 		for( e in entities ) drawEntity(c, e, scale);
 		drawPlayer(c, scale);
 
 		c.setTransform(ratio, 0, 0, ratio, 0, 0);
 		drawHud(c, cw / ratio, ch / ratio);
+	}
+
+	function inStuckSpan() : Bool {
+		if( stuck.length == 0 ) return false;
+		var ts = grid.ts;
+		var col = Std.int(Math.floor(player.x / ts)), row = Std.int(Math.floor((player.y - 0.5) / ts));
+		for( sp in stuck )
+			if( sp.row == row && col >= sp.col && col < sp.col + sp.w ) return true;
+		return false;
+	}
+
+	function drawStuck(c:js.html.CanvasRenderingContext2D) {
+		if( stuck.length == 0 ) return;
+		var ts = grid.ts;
+		c.fillStyle = "rgba(255,70,70,0.22)";
+		for( sp in stuck ) c.fillRect(sp.col * ts, sp.row * ts, sp.w * ts, ts);
 	}
 
 	function drawGhost(c:js.html.CanvasRenderingContext2D, scale:Float) {
