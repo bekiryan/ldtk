@@ -957,6 +957,8 @@ class App extends dn.Process {
 		LOG.flushToFile();
 		curPageProcess = create();
 		curPageProcess.onAppResize();
+		if( gldtkSidebar!=null )
+			gldtkSidebar.onPageLoaded();
 
 		// Notify app update
 		if( checkAndNotifyUpdate && settings.v.lastKnownVersion!=Const.getAppVersionStr() ) {

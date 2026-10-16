@@ -847,6 +847,16 @@ class Project {
 			return false;
 	}
 
+	/** Return TRUE if the image file on disk has exactly the same content as the cached one **/
+	public function isCachedImageUpToDate(relPath:String) {
+		if( !isImageLoaded(relPath) )
+			return false;
+
+		var cached = imageCache.get(relPath).bytes;
+		var bytes = NT.readFileBytes( makeAbsoluteFilePath(relPath) );
+		return cached!=null && bytes!=null && bytes.compare(cached)==0;
+	}
+
 	public function disposeImage(relPath:String) {
 		if( isImageLoaded(relPath) ) {
 			App.LOG.add("cache", 'Disposing cached image $relPath...');

@@ -80,9 +80,7 @@ class LevelRender extends dn.Process {
 			case WorldMode(active):
 				if( active ) {
 					// Remove hidden render
-					for(l in layerRenders)
-						l.dispose();
-					layerRenders = new Map();
+					disposeAllLayerRenders();
 					grid.clear();
 
 					// Stop process
@@ -119,6 +117,10 @@ class LevelRender extends dn.Process {
 			case ProjectSaved, BeforeProjectSaving:
 
 			case ProjectSelected:
+				// The project can be swapped inside the same Editor (LastChance, GLDtk reload): renders of
+				// the previous project's layers would otherwise stay on screen
+				disposeAllLayerRenders();
+				layerInvalidations = new Map();
 				renderAll();
 
 			case ExternalEnumsLoaded(anyCriticalChange):
@@ -590,6 +592,12 @@ class LevelRender extends dn.Process {
 
 		for(ld in editor.project.defs.layers)
 			renderLayer( editor.curLevel.getLayerInstance(ld) );
+	}
+
+	function disposeAllLayerRenders() {
+		for(lr in layerRenders)
+			lr.dispose();
+		layerRenders = new Map();
 	}
 
 	public inline function clearTemp() {
