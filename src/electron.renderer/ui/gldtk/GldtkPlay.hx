@@ -772,7 +772,7 @@ class GldtkPlay {
 	function inStuckSpan() : Bool {
 		if( stuck.length == 0 ) return false;
 		var ts = grid.ts;
-		var col = Std.int(Math.floor(player.x / ts)), row = Std.int(Math.floor((player.y - 0.5) / ts));
+		var col = Std.int(Math.floor(player.x / ts)), row = Std.int(Math.floor((player.y + 0.5) / ts)); // the floor tile under the feet (span rows are floor rows)
 		for( sp in stuck )
 			if( sp.row == row && col >= sp.col && col < sp.col + sp.w ) return true;
 		return false;
