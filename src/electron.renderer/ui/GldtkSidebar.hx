@@ -30,6 +30,7 @@ class GldtkSidebar {
 	static inline var CX_KEY       = "gldtk_complexity";     // "auto" or 1..10
 	static inline var CX_SEC_KEY   = "gldtk_complexity_sec";
 	static inline var FILL_KEY     = "gldtk_fill";          // "off" or 0..100 (percent)
+	static inline var BG_KEY = "gldtk_background"; // "1" = on, default off
 	static inline var STAMP_KEY = "gldtk_stamp_patterns"; // "0" = off, default on (v4 Part 29a)
 	static inline var PATTERNS_KEY = "gldtk_patterns";      // "" (off) or 1..5
 	static inline var CHUNKS_KEY   = "gldtk_chunks";
@@ -338,6 +339,7 @@ class GldtkSidebar {
 						<span class="g-opt-label">Difficulty</span>
 						<input type="range" id="g-cx" min="1" max="10" step="1" value="5"/>
 						<span class="g-opt-val" id="g-cx-val"></span>
+						<a href="#" id="g-cx-reset" title="Reset difficulty to 5" style="display:none">&#x21BA;</a>
 						<label class="g-opt-off"><input type="checkbox" id="g-cx-auto"/>Auto</label>
 					</div>
 					<div class="g-opt-row" title="Fill empty space with noise-shaped rock">
@@ -355,6 +357,9 @@ class GldtkSidebar {
 					</div>
 					<div class="g-opt-row" title="Build carved sections from real level pieces in the pattern library">
 						<label class="g-opt-off"><input type="checkbox" id="g-stamp" checked="checked"/>Use real level pieces</label>
+					</div>
+					<div class="g-opt-row" title="Add the decorative Background layer">
+						<label class="g-opt-off"><input type="checkbox" id="g-bg"/>Background decor</label>
 					</div>
 					<div class="g-opt-row" title="Append new endless chunks to the open world file">
 						<span class="g-opt-label">Chunks</span>
@@ -757,6 +762,25 @@ class GldtkSidebar {
 		var jTheme = jRoot.find("#g-chunks-theme");
 		var pat = loadStr(PATTERNS_KEY);
 		if( pat != null ) jPat.val(pat);
+		var jCx = jRoot.find("#g-cx");
+		var jCxVal = jRoot.find("#g-cx-val");
+		var jCxReset = jRoot.find("#g-cx-reset");
+		function cxMark(restored:Bool) {
+			var off = jRoot.find("#g-cx-auto").prop("checked") == true;
+			var moved = Std.string(jCx.val()) != "5";
+			jCxReset.css("display", moved && !off ? "inline" : "none");
+			if( restored && moved && !off ) jCxVal.text(jCx.val() + " (saved)");
+		}
+		cxMark(true);
+		jCx.on("input", _-> cxMark(false));
+		jRoot.find("#g-cx-auto").change( _-> cxMark(false) );
+		jCxReset.click( (e)-> {
+			e.preventDefault();
+			jCx.val("5").trigger("input");
+		});
+		var jBg = jRoot.find("#g-bg");
+		jBg.prop("checked", loadStr(BG_KEY) == "1");
+		jBg.change( _-> saveStr(BG_KEY, jBg.prop("checked") == true ? "1" : "0") );
 		var jStamp = jRoot.find("#g-stamp");
 		jStamp.prop("checked", loadStr(STAMP_KEY) != "0");
 		jStamp.change( _-> saveStr(STAMP_KEY, jStamp.prop("checked") == true ? "1" : "0") );
@@ -821,6 +845,15 @@ class GldtkSidebar {
 		var pat = patternsValue();
 		if( pat != null ) payload.patterns = pat;
 		payload.stamp_patterns = jRoot.find("#g-stamp").prop("checked") == true;
+		payload.background = jRoot.find("#g-bg").prop("checked") == true;
+	}
+
+	/** First line only; a provider overload gets a plain-language hint. **/
+	static function shortError(msg:String) : String {
+		var first = msg.split("\n")[0];
+		if( first.indexOf("503") >= 0 )
+			return "Gemini is busy (HTTP 503) — try again or use the local model";
+		return first.length > 160 ? first.substr(0,157) + "…" : first;
 	}
 
 	/** POST /chunks: appends endless chunks to the open world file, then reloads it. **/
@@ -832,6 +865,7 @@ class GldtkSidebar {
 		if( n > 10 ) n = 10;
 		var theme = StringTools.trim( jRoot.find("#g-chunks-theme").val() );
 		var payload : Dynamic = { path: path, count: n, seed: Std.int( Math.random() * 100000 ), orientation: "horizontal" };
+		payload.background = jRoot.find("#g-bg").prop("checked") == true;
 		if( theme.length > 0 ) payload.theme = theme;
 		appendMsg("user", '<span class="g-meta">&#x21E5; Chunks</span>Generate next $n chunk${n == 1 ? "" : "s"}${theme.length > 0 ? " (" + esc(theme) + ")" : ""}');
 		saveFirst( ()-> {
@@ -2128,10 +2162,12 @@ class GldtkSidebar {
 				setStatus("error");
 			}
 			else if( res.success == false ) {
-				appendMsg("err", res.error != null ? esc(res.error) : "Unknown error");
+				jHistory.find(".g-msg-err").remove();
+				appendMsg("err", res.error != null ? esc(shortError(Std.string(res.error))) : "Unknown error");
 				setStatus("error");
 			}
 			else {
+				jHistory.find(".g-msg-err").remove();
 				if( cancelling ) noteTooLate();
 				onSuccess(res, outPath);
 			}
