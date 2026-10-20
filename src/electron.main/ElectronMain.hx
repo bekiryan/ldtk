@@ -65,17 +65,18 @@ class ElectronMain {
 		// *** sendSync/on *****************************************************
 	}
 
-	/** Starts <resources>/gldtk-server/gldtk-server on port 8765 (or a free port), then calls `next`.
+	/** Starts <resources>/gldtk-server/gldtk-server(.exe) on port 8765 (or a free port), then calls `next`.
 		The port reaches the renderer through the GLDTK_PORT environment variable. **/
 	static function startGldtkServer(next:Void->Void) {
-		var exe = (untyped process.resourcesPath) + "/gldtk-server/gldtk-server";
+		var exe = (untyped process.resourcesPath) + "/gldtk-server/gldtk-server" + (process.platform=="win32" ? ".exe" : "");
 		if( !js.node.Fs.existsSync(exe) ) {
 			next(); // dev: server.py is started by start.sh
 			return;
 		}
 		function launch(port:Int) {
 			process.env.set("GLDTK_PORT", Std.string(port));
-			gldtkServer = ChildProcess.spawn(exe, ["--port", Std.string(port), "--parent-pid", Std.string(process.pid)], { stdio:"ignore" });
+			var opts : Dynamic = { stdio:"ignore", windowsHide:true }; // windowsHide: no console window on Windows
+			gldtkServer = ChildProcess.spawn(exe, ["--port", Std.string(port), "--parent-pid", Std.string(process.pid)], opts);
 			gldtkServer.on("error", (_)->{});
 			// Wait (up to ~15s) for /health, but never block the UI longer than that
 			var tries = 0;
