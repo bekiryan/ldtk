@@ -82,25 +82,11 @@
   text-transform: uppercase;
 }
 #gldtk-root .g-clear:hover { color: #c1cfeb; border-color: #737f9d; }
-#gldtk-root .g-gear {
-  flex: none;
-  width: auto;
-  margin: 0 0 0 6px;
-  padding: 0 5px;
-  font-size: 14px;
-  line-height: 18px;
-  background: transparent;
-  color: #737f9d;
-  border: 1px solid transparent;
-  box-shadow: none;
-}
-#gldtk-root .g-gear:hover { color: #c1cfeb; }
-#gldtk-root .g-gear.open { color: #ffcc00; border-color: #545d73; }
 
-/* ── Settings (gear) ────────────────────────────────────────────────────── */
+/* ── Settings fold ──────────────────────────────────────────────────────── */
 #gldtk-root .g-settings {
   display: none;
-  padding: 0 2px 8px;
+  padding: 0 2px 6px;
   border-bottom: 1px solid #2e333f;
 }
 #gldtk-root .g-set-label { padding: 6px 0 3px; font-size: 10px; color: #737f9d; }

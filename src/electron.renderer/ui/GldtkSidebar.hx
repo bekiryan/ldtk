@@ -155,7 +155,7 @@ class GldtkSidebar {
 	var jLevelHead        : J;
 	var jLevelFold        : J;
 	var jSettings         : J;
-	var jGear             : J;
+	var jSettingsHead     : J;
 
 	// Live progress + Cancel (v3 Part 14)
 	var job : Null<GldtkJob>;                  // the running generate / edit / locate
@@ -199,7 +199,7 @@ class GldtkSidebar {
 	}
 
 	function setSettingsOpen(open:Bool) {
-		jGear.toggleClass("open", open);
+		jSettingsHead.toggleClass("open", open);
 		jSettings.css("display", open ? "block" : "none");
 		if( open ) jRoot.find("#g-key").focus();
 	}
@@ -233,7 +233,6 @@ class GldtkSidebar {
 				<span class="g-title">GLDtk</span>
 				<span class="g-status" id="g-status">ready</span>
 				<button class="g-clear" id="g-clear" title="Clear the chat history">clear</button>
-				<button class="g-gear" id="g-gear" title="Settings: API key and model">&#x2699;</button>
 			</div>
 
 			<div class="g-progress" id="g-progress">
@@ -253,19 +252,6 @@ class GldtkSidebar {
 
 				<div class="g-file-row" id="g-file-row">
 					<span class="g-file-label">No project open</span>
-				</div>
-
-				<div class="g-settings" id="g-settings">
-					<div class="g-section">SETTINGS</div>
-					<div class="g-set-label">Provider and model</div>
-					<div class="g-field g-provider-row">
-						<select id="g-provider">$providerOpts</select>
-						<input id="g-model" type="text" placeholder="default model"/>
-					</div>
-					<div class="g-set-label">Gemini API key <span class="g-hint" id="g-key-state"></span></div>
-					<input id="g-key" class="g-key" type="password" placeholder="Paste your Gemini API key" autocomplete="off"/>
-					<button id="g-key-save" class="g-key-save">Save key</button>
-					<div class="g-key-msg" id="g-key-msg"></div>
 				</div>
 
 				<div class="g-section">PROMPT</div>
@@ -405,6 +391,22 @@ class GldtkSidebar {
 				</div>
 				<div class="g-prof g-mem" id="g-mem"></div>
 
+				<div class="g-fold-head" id="g-settings-head">
+					<span class="g-caret"></span>SETTINGS
+					<span class="g-hint">provider, model, API key</span>
+				</div>
+				<div class="g-settings" id="g-settings">
+					<div class="g-set-label">Provider and model</div>
+					<div class="g-field g-provider-row">
+						<select id="g-provider">$providerOpts</select>
+						<input id="g-model" type="text" placeholder="default model"/>
+					</div>
+					<div class="g-set-label">Gemini API key <span class="g-hint" id="g-key-state"></span></div>
+					<input id="g-key" class="g-key" type="password" placeholder="Paste your Gemini API key" autocomplete="off"/>
+					<button id="g-key-save" class="g-key-save">Save key</button>
+					<div class="g-key-msg" id="g-key-msg"></div>
+				</div>
+
 			</div>
 		');
 		new J("body").append(jRoot);
@@ -440,8 +442,8 @@ class GldtkSidebar {
 		jLevelFold   = jRoot.find("#g-level-fold");
 		jLevelHead.click( _-> setLevelOpen( !jLevelHead.hasClass("open") ) );
 		jSettings    = jRoot.find("#g-settings");
-		jGear        = jRoot.find("#g-gear");
-		jGear.click( _-> setSettingsOpen( !jGear.hasClass("open") ) );
+		jSettingsHead = jRoot.find("#g-settings-head");
+		jSettingsHead.click( _-> setSettingsOpen( !jSettingsHead.hasClass("open") ) );
 		jLevelBox    = jRoot.find("#g-level-box");
 		jLevelList   = jRoot.find("#g-level-list");
 		jLevelEditing = jRoot.find("#g-level-editing");
