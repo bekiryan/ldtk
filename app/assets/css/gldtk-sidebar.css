@@ -82,6 +82,38 @@
   text-transform: uppercase;
 }
 #gldtk-root .g-clear:hover { color: #c1cfeb; border-color: #737f9d; }
+#gldtk-root .g-gear {
+  flex: none;
+  width: auto;
+  margin: 0 0 0 6px;
+  padding: 0 5px;
+  font-size: 14px;
+  line-height: 18px;
+  background: transparent;
+  color: #737f9d;
+  border: 1px solid transparent;
+  box-shadow: none;
+}
+#gldtk-root .g-gear:hover { color: #c1cfeb; }
+#gldtk-root .g-gear.open { color: #ffcc00; border-color: #545d73; }
+
+/* ── Settings (gear) ────────────────────────────────────────────────────── */
+#gldtk-root .g-settings {
+  display: none;
+  padding: 0 2px 8px;
+  border-bottom: 1px solid #2e333f;
+}
+#gldtk-root .g-set-label { padding: 6px 0 3px; font-size: 10px; color: #737f9d; }
+#gldtk-root .g-settings .g-key {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 5px 6px;
+  font-size: 11px;
+}
+#gldtk-root .g-settings .g-key-save { display: block; width: 100%; margin: 4px 0 0; padding: 5px; font-size: 10px; }
+#gldtk-root .g-key-msg { padding-top: 3px; font-size: 9px; color: #ffa386; }
+#gldtk-root .g-level-fold { display: none; }
 
 /* ── Live progress (v3 Part 14) ─────────────────────────────────────────── */
 #gldtk-root .g-progress {
@@ -622,8 +654,7 @@
 #gldtk-play .gp-close { width: auto; }
 
 /* ── Multi-level worlds (v3 Part 17b) ───────────────────────────────────── */
-#gldtk-root .g-gen-row { display: flex; gap: 6px; align-items: stretch; }
-#gldtk-root .g-gen-row select { flex: 0 0 96px; width: 96px; }
+#gldtk-root .g-gen-row { display: flex; padding-top: 4px; }
 #gldtk-root .g-gen-row .g-gen-btn { flex: 1; width: auto; }
 #gldtk-root .g-levels { display: none; padding: 4px 2px; border-bottom: 1px solid #2e333f; font-size: 10px; color: #737f9d; }
 #gldtk-root .g-levels.open { display: block; }

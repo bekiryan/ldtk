@@ -19,14 +19,10 @@ class GldtkSidebar {
 	static inline var HIST_KEY     = "gldtk_history";
 	static inline var PROVIDER_KEY = "gldtk_provider";
 	static inline var MODEL_KEY    = "gldtk_model";
-	static inline var PROFILE_KEY  = "gldtk_profile_open";
-	static inline var MEMORY_KEY   = "gldtk_memory_open";
 	static var STRUCTURES = ["corridor","parkour","labyrinth","arena","shaft","hub","open"];
 	static var MEMORY_STATS = ["gap","enemy_spacing_median","removed_kinds","undo_rate"];
-	static inline var EDIT_KEY     = "gldtk_edit_open";
 	static inline var MODE_KEY     = "gldtk_edit_mode";
 	static inline var ROUTE_KEY    = "gldtk_route_on";
-	static inline var OPTS_KEY     = "gldtk_opts_open";
 	static inline var CX_KEY       = "gldtk_complexity";     // "auto" or 1..10
 	static inline var CX_SEC_KEY   = "gldtk_complexity_sec";
 	static inline var FILL_KEY     = "gldtk_fill";          // "off" or 0..100 (percent)
@@ -149,13 +145,17 @@ class GldtkSidebar {
 	var levelInfoPath     : Null<String>;
 	var fullReload        = false;             // the next reload brings new levels
 	var reselectIid       : Null<String>;      // level to select again once the project is reloaded
-	var jLevels           : J;                 // "Levels" select next to Generate
+	var jLevels           : J;                 // "Levels" count in the generation options
 	var jLevelBox         : J;
 	var jLevelList        : J;
 	var jLevelEditing     : J;
 	var jOptsHead         : J;
 	var jOpts             : J;
 	var jOptsNote         : J;
+	var jLevelHead        : J;
+	var jLevelFold        : J;
+	var jSettings         : J;
+	var jGear             : J;
 
 	// Live progress + Cancel (v3 Part 14)
 	var job : Null<GldtkJob>;                  // the running generate / edit / locate
@@ -170,27 +170,43 @@ class GldtkSidebar {
 		onProjectChanged();
 	}
 
-	/** First launch of the packaged app: no Gemini key yet, so show the key form. **/
+	/** No Gemini key yet (first launch): open Settings so the key form is the first thing seen. **/
 	function loadSettings() {
-		var jBox = jRoot.find("#g-key-box");
 		var jKey = jRoot.find("#g-key");
 		var jMsg = jRoot.find("#g-key-msg");
+		var jState = jRoot.find("#g-key-state");
+		function showHasKey(has:Bool) jState.text( has ? "saved" : "not set" );
 		jRoot.find("#g-key-save").click( (_)->{
 			var key = StringTools.trim( jKey.val() );
 			if( key == "" ) return;
+			jMsg.text("");
 			request("POST", "/settings", { gemini_api_key:key }, (status, res)->{
 				if( status == 200 && res != null && res.has_key ) {
 					jKey.val("");
-					jBox.hide();
+					showHasKey(true);
+					setSettingsOpen(false);
 				}
 				else
 					jMsg.text("Could not save the key");
 			}, ()->jMsg.text("server offline") );
 		});
 		request("GET", "/settings", null, (status, res)->{
-			if( status == 200 && res != null && !res.has_key )
-				jBox.show();
+			if( status != 200 || res == null ) return;
+			showHasKey(res.has_key == true);
+			if( res.has_key != true && jProvider.val() == "gemini" )
+				setSettingsOpen(true);
 		}, ()->{} );
+	}
+
+	function setSettingsOpen(open:Bool) {
+		jGear.toggleClass("open", open);
+		jSettings.css("display", open ? "block" : "none");
+		if( open ) jRoot.find("#g-key").focus();
+	}
+
+	function setLevelOpen(open:Bool) {
+		jLevelHead.toggleClass("open", open);
+		jLevelFold.css("display", open ? "block" : "none");
 	}
 
 	// ── CSS ───────────────────────────────────────────────────────────────
@@ -217,6 +233,7 @@ class GldtkSidebar {
 				<span class="g-title">GLDtk</span>
 				<span class="g-status" id="g-status">ready</span>
 				<button class="g-clear" id="g-clear" title="Clear the chat history">clear</button>
+				<button class="g-gear" id="g-gear" title="Settings: API key and model">&#x2699;</button>
 			</div>
 
 			<div class="g-progress" id="g-progress">
@@ -238,40 +255,52 @@ class GldtkSidebar {
 					<span class="g-file-label">No project open</span>
 				</div>
 
-				<div class="g-levels" id="g-level-box">
-					<div class="g-levels-editing" id="g-level-editing"></div>
-					<div class="g-level-list" id="g-level-list"></div>
-					<button id="g-regen" class="g-small-btn" title="Generate this level again with its own prompt; the other levels and the links stay">&#x21BB; Regenerate this level</button>
+				<div class="g-settings" id="g-settings">
+					<div class="g-section">SETTINGS</div>
+					<div class="g-set-label">Provider and model</div>
+					<div class="g-field g-provider-row">
+						<select id="g-provider">$providerOpts</select>
+						<input id="g-model" type="text" placeholder="default model"/>
+					</div>
+					<div class="g-set-label">Gemini API key <span class="g-hint" id="g-key-state"></span></div>
+					<input id="g-key" class="g-key" type="password" placeholder="Paste your Gemini API key" autocomplete="off"/>
+					<button id="g-key-save" class="g-key-save">Save key</button>
+					<div class="g-key-msg" id="g-key-msg"></div>
 				</div>
 
-				<div class="g-play-row">
-					<button id="g-play" class="g-play-btn" title="Play the level with the Game Profile physics (Esc to close)">&#x25B6;&nbsp; Play</button>
+				<div class="g-section">PROMPT</div>
+				<div class="g-field">
+					<textarea id="g-prompt" rows="4"
+					          placeholder="Describe the level… (Ctrl+Enter to generate)"></textarea>
+				</div>
+				<div class="g-field g-gen-row">
+					<button id="g-btn" class="g-gen-btn">&#x25B6;&nbsp; Generate</button>
 				</div>
 
-				<div class="g-route-row">
-					<label class="g-route-toggle" title="Draw the cheapest Start → Exit route over the level">
-						<input type="checkbox" id="g-route-on"/>Show route
-					</label>
-					<span class="g-route-sum" id="g-route-sum"></span>
+				<div class="g-fold-head" id="g-level-head">
+					<span class="g-caret"></span>LEVEL
+					<span class="g-hint">play, route, difficulty</span>
 				</div>
+				<div class="g-level-fold" id="g-level-fold">
+					<div class="g-levels" id="g-level-box">
+						<div class="g-levels-editing" id="g-level-editing"></div>
+						<div class="g-level-list" id="g-level-list"></div>
+						<button id="g-regen" class="g-small-btn" title="Generate this level again with its own prompt; the other levels and the links stay">&#x21BB; Regenerate this level</button>
+					</div>
 
-				<div class="g-diff" id="g-diff"></div>
+					<div class="g-play-row">
+						<button id="g-play" class="g-play-btn" title="Play the level with the Game Profile physics (Esc to close)">&#x25B6;&nbsp; Play</button>
+					</div>
 
-				<div class="g-fold-head" id="g-prof-head">
-					<span class="g-caret"></span>GAME PROFILE
-					<span class="g-hint" id="g-prof-note"></span>
-				</div>
-				<div class="g-prof" id="g-prof">
-					${profileFormHtml()}
-					<div class="g-prof-err" id="g-prof-err"></div>
-					<button class="g-prof-save" id="g-prof-save">Save profile</button>
-				</div>
+					<div class="g-route-row">
+						<label class="g-route-toggle" title="Draw the cheapest Start → Exit route over the level">
+							<input type="checkbox" id="g-route-on"/>Show route
+						</label>
+						<span class="g-route-sum" id="g-route-sum"></span>
+					</div>
 
-				<div class="g-fold-head" id="g-mem-head">
-					<span class="g-caret"></span>DESIGN MEMORY
-					<span class="g-hint" id="g-mem-note"></span>
+					<div class="g-diff" id="g-diff"></div>
 				</div>
-				<div class="g-prof g-mem" id="g-mem"></div>
 
 				<div class="g-fold-head" id="g-edit-head">
 					<span class="g-caret"></span>EDIT
@@ -312,29 +341,18 @@ class GldtkSidebar {
 					</div>
 				</div>
 
-				<div class="g-section">PROVIDER</div>
-				<div class="g-field g-provider-row">
-					<select id="g-provider">$providerOpts</select>
-					<input id="g-model" type="text" placeholder="default model"/>
-				</div>
-				<div class="g-field" id="g-key-box" style="display:none">
-					<div>Add your Gemini API key</div>
-					<input id="g-key" type="password" placeholder="Gemini API key" autocomplete="off"/>
-					<button id="g-key-save">Save key</button>
-					<div id="g-key-msg"></div>
-				</div>
-
-				<div class="g-section">PROMPT</div>
-				<div class="g-field">
-					<textarea id="g-prompt" rows="4"
-					          placeholder="Describe the level… (Ctrl+Enter to generate)"></textarea>
-				</div>
-
 				<div class="g-fold-head" id="g-opts-head">
 					<span class="g-caret"></span>GENERATION OPTIONS
 					<span class="g-hint" id="g-opts-note"></span>
 				</div>
 				<div class="g-opts" id="g-opts">
+					<div class="g-opt-row" title="Number of levels: Auto lets the prompt decide">
+						<span class="g-opt-label">Levels</span>
+						<select id="g-levels">
+							<option value="">Auto</option>
+							${[1,2,3,4,5,6,7,8].map( n->'<option value="$n">$n</option>' ).join("")}
+						</select>
+					</div>
 					<div class="g-opt-row" title="How intricate the level should be (Auto lets the prompt decide)">
 						<span class="g-opt-label">Difficulty</span>
 						<input type="range" id="g-cx" min="1" max="10" step="1" value="5"/>
@@ -371,13 +389,21 @@ class GldtkSidebar {
 					</div>
 				</div>
 
-				<div class="g-field g-gen-row">
-					<select id="g-levels" title="Number of levels: Auto lets the prompt decide">
-						<option value="">Levels: Auto</option>
-						${[1,2,3,4,5,6,7,8].map( n->'<option value="$n">Levels: $n</option>' ).join("")}
-					</select>
-					<button id="g-btn" class="g-gen-btn">&#x25B6;&nbsp; Generate</button>
+				<div class="g-fold-head" id="g-prof-head">
+					<span class="g-caret"></span>GAME PROFILE
+					<span class="g-hint" id="g-prof-note"></span>
 				</div>
+				<div class="g-prof" id="g-prof">
+					${profileFormHtml()}
+					<div class="g-prof-err" id="g-prof-err"></div>
+					<button class="g-prof-save" id="g-prof-save">Save profile</button>
+				</div>
+
+				<div class="g-fold-head" id="g-mem-head">
+					<span class="g-caret"></span>DESIGN MEMORY
+					<span class="g-hint" id="g-mem-note"></span>
+				</div>
+				<div class="g-prof g-mem" id="g-mem"></div>
 
 			</div>
 		');
@@ -410,6 +436,12 @@ class GldtkSidebar {
 		bindOptions();
 
 		jLevels      = jRoot.find("#g-levels");
+		jLevelHead   = jRoot.find("#g-level-head");
+		jLevelFold   = jRoot.find("#g-level-fold");
+		jLevelHead.click( _-> setLevelOpen( !jLevelHead.hasClass("open") ) );
+		jSettings    = jRoot.find("#g-settings");
+		jGear        = jRoot.find("#g-gear");
+		jGear.click( _-> setSettingsOpen( !jGear.hasClass("open") ) );
 		jLevelBox    = jRoot.find("#g-level-box");
 		jLevelList   = jRoot.find("#g-level-list");
 		jLevelEditing = jRoot.find("#g-level-editing");
@@ -625,12 +657,15 @@ class GldtkSidebar {
 		jProvider.val( provider != null && PROVIDERS.contains(provider) ? provider : PROVIDERS[0] );
 		var model = loadStr(MODEL_KEY);
 		if( model != null ) jModel.val(model);
-		setProfileOpen( loadStr(PROFILE_KEY) == "1" );
-		setMemoryOpen( loadStr(MEMORY_KEY) == "1" );
+		// Every section starts folded: the prompt and Generate are all a new user sees
+		setSettingsOpen(false);
+		setLevelOpen(false);
+		setProfileOpen(false);
+		setMemoryOpen(false);
 		var mode = loadStr(MODE_KEY);
 		setEditMode( mode != null && EDIT_MODES.filter( m->m.id == mode ).length > 0 ? mode : EDIT_MODES[0].id );
-		setEditOpen( loadStr(EDIT_KEY) != "0" );
-		restoreOptions();
+		setEditOpen(false);
+		setOptsOpen(false);
 		jRouteOn.prop("checked", loadStr(ROUTE_KEY) != "0");
 		refreshFileRow();
 	}
@@ -795,14 +830,9 @@ class GldtkSidebar {
 		jOptsHead.click( _-> setOptsOpen( !jOptsHead.hasClass("open") ) );
 	}
 
-	function restoreOptions() {
-		setOptsOpen( loadStr(OPTS_KEY) == "1" );
-	}
-
 	function setOptsOpen(open:Bool) {
 		jOptsHead.toggleClass("open", open);
 		jOpts.css("display", open ? "block" : "none"); // toggle() cannot tell while the sidebar is hidden
-		saveStr(OPTS_KEY, open ? "1" : "0");
 		refreshOptsNote();
 	}
 
@@ -911,7 +941,6 @@ class GldtkSidebar {
 	function setMemoryOpen(open:Bool) {
 		jMemHead.toggleClass("open", open);
 		jMem.toggle(open);
-		saveStr(MEMORY_KEY, open ? "1" : "0");
 		if( open ) refreshMemory();
 	}
 
@@ -1018,7 +1047,6 @@ class GldtkSidebar {
 	function setProfileOpen(open:Bool) {
 		jProfHead.toggleClass("open", open);
 		jProf.toggle(open);
-		saveStr(PROFILE_KEY, open ? "1" : "0");
 		if( open && profile == null && currentProjectPath() != null )
 			loadProfile();
 	}
@@ -1154,7 +1182,6 @@ class GldtkSidebar {
 	function setEditOpen(open:Bool) {
 		jEditHead.toggleClass("open", open);
 		jEdit.toggle(open);
-		saveStr(EDIT_KEY, open ? "1" : "0");
 		if( !open && activeEditor() != null )
 			activeEditor().clearSpecialTool();
 		drawOverlay();
