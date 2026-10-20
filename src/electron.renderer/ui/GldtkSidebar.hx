@@ -2311,14 +2311,18 @@ class GldtkSidebar {
 		return js.node.Path.resolve(a) == js.node.Path.resolve(b);
 	}
 
+	function noteNotOpened(path:String) {
+		fullReload = false;
+		var shortPath = path.split("/").slice(-2).join("/");
+		appendMsg("ai", 'Saved ${esc(shortPath)}. It was not opened because another project is open now.');
+		setStatus("ready");
+	}
+
 	function reloadGeneratedProject(path:String) {
 		// The user may have switched or closed projects while the server was working:
 		// the file is saved either way, but only the project it belongs to is reloaded.
 		if( !samePath(currentProjectPath(), path) ) {
-			var parts = path.split("/");
-			var shortPath = parts.slice(-2).join("/");
-			appendMsg("ai", 'Saved ${esc(shortPath)}. It was not opened because another project is open now.');
-			setStatus("ready");
+			noteNotOpened(path);
 			return;
 		}
 		var editor = activeEditor();
@@ -2329,6 +2333,11 @@ class GldtkSidebar {
 		new ui.ProjectLoader(
 			path,
 			(p)-> {
+				// The file is read asynchronously: the project may have changed meanwhile
+				if( !samePath(currentProjectPath(), path) ) {
+					noteNotOpened(path);
+					return;
+				}
 				if( editor.destroyed ) {
 					App.ME.loadProject(path, null, (q)-> setStatus(q != null ? "ready" : "error") );
 					return;
