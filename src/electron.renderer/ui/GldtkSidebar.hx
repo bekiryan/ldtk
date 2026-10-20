@@ -926,6 +926,7 @@ class GldtkSidebar {
 
 	/** POST /chunks: appends endless chunks to the open world file, then reloads it. **/
 	function generateChunks() {
+		if( leaveSample(generateChunks) ) return;
 		var path = editTargetPath();
 		if( path == null ) return;
 		var n = Std.parseInt( jRoot.find("#g-chunks-n").val() );
@@ -1154,6 +1155,7 @@ class GldtkSidebar {
 	function saveProfile() {
 		var path = profilePath;
 		if( profile == null || path == null || path != currentProjectPath() ) return;
+		if( leaveSample(()-> { profilePath = currentProjectPath(); saveProfile(); }) ) return;
 
 		// Edit a copy of the loaded profile so fields the panel doesn't show survive.
 		var body : Dynamic = haxe.Json.parse( haxe.Json.stringify(profile) );
@@ -1476,6 +1478,56 @@ class GldtkSidebar {
 		});
 	}
 
+	/**
+		In LDtk's app dir, or its samples dir: `Project.isSample()` alone misses the packaged
+		Mac app, where the samples are in Contents/extraFiles and the exe in Contents/MacOS.
+	**/
+	static function isBundledSample(path:Null<String>) : Bool {
+		if( path == null ) return false;
+		var samples = js.node.Path.resolve( JsTools.getSamplesDir() ) + js.node.Path.sep;
+		return App.ME.isInAppDir(path, true) || js.node.Path.resolve(path).indexOf(samples) == 0;
+	}
+
+	/**
+		GLDtk never writes into LDtk's bundled samples (app dir; inside the .app when packaged).
+		When the open project is one, asks where to save a copy, switches the editor to the copy
+		and calls `retry`. Returns true when the caller must stop (the copy calls it again).
+	**/
+	function leaveSample(retry:Void->Void) : Bool {
+		var editor = activeEditor();
+		if( editor == null || !isBundledSample(editor.project.filePath.full) )
+			return false;
+		var project = editor.project;
+		var docs = js.node.Path.join( js.node.Os.homedir(), "Documents" );
+		var dir = NT.fileExists(docs) ? docs : js.node.Os.homedir();
+		var startPath = js.node.Path.join(dir, project.filePath.fileName + "-gldtk." + Const.FILE_EXTENSION);
+		appendMsg("ai", "This is a bundled LDtk sample, which GLDtk does not change. Choose where to save your copy.");
+		setStatus("save a copy…");
+		dn.js.ElectronDialogs.saveFileAs(["."+Const.FILE_EXTENSION], startPath, (filePath:String)-> {
+			if( activeEditor() != editor || editor.project != project ) return;
+			if( isBundledSample(filePath) ) {
+				appendMsg("err", "Pick a folder outside the LDtk app: files there are lost on update.");
+				setStatus("ready");
+				return;
+			}
+			// Same steps as LDtk's own "Save as"
+			var oldDir = project.getProjectDir();
+			project.filePath.parseFilePath(filePath);
+			project.remapAllRelativePaths(oldDir, project.getProjectDir());
+			editor.onSave(false, [ "missing"=>true, "sample"=>true ], ()-> {
+				if( editor.needSaving || !NT.fileExists(filePath) ) {
+					appendMsg("err", "Could not save the copy.");
+					setStatus("error");
+					return;
+				}
+				refreshFileRow();
+				setStatus("ready");
+				retry();
+			});
+		});
+		return true;
+	}
+
 	function editPrompt() : Null<String> {
 		var prompt = StringTools.trim( jEditPrompt.val() );
 		if( prompt.length == 0 ) {
@@ -1493,6 +1545,7 @@ class GldtkSidebar {
 		}
 		var prompt = editPrompt();
 		if( prompt == null ) return;
+		if( leaveSample(applyEdit) ) return;
 		var path = editTargetPath();
 		if( path == null ) return;
 
@@ -1538,6 +1591,7 @@ class GldtkSidebar {
 	}
 
 	function applyStructure() {
+		if( leaveSample(applyStructure) ) return;
 		var type : String = jStructure.val();
 		jStructure.val("");
 		if( type == null || type == "" ) return;
@@ -1680,6 +1734,7 @@ class GldtkSidebar {
 		if( located == null ) return;
 		var prompt = editPrompt();
 		if( prompt == null ) return;
+		if( leaveSample(applyLocated) ) return;
 		var path = editTargetPath();
 		if( path == null ) return;
 		var payload = editBase(path);
@@ -2164,6 +2219,7 @@ class GldtkSidebar {
 	function regenerateLevel() {
 		var iid = curLevelIid();
 		if( iid == null || editTargetPath() == null ) return;
+		if( leaveSample(regenerateLevel) ) return;
 		saveFirst( ()-> generate(iid, levelPrompt(iid)) );
 	}
 
@@ -2189,6 +2245,7 @@ class GldtkSidebar {
 			appendMsg("err", "Open a .ldtk project in LDtk first, then generate.");
 			return;
 		}
+		if( leaveSample(generate.bind(regenLevel, levelPrompt)) ) return;
 
 		appendMsg("user", regenLevel != null
 			? '<span class="g-meta">&#x21BB; Regenerate ${esc(levelLabel(regenLevel))}</span>' + esc(description)
@@ -2219,7 +2276,7 @@ class GldtkSidebar {
 			if( status == 200 && res != null && res.cancelled == true )
 				onCancelled();
 			else if( status != 200 ) {
-				appendMsg("err", 'Server returned HTTP ${status}.');
+				appendMsg("err", esc(errorText(status, res)));
 				setStatus("error");
 			}
 			else if( res == null ) {
