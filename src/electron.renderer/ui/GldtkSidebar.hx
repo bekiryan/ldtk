@@ -41,6 +41,8 @@ class GldtkSidebar {
 	static inline var LOCATE_COLOR  = 0xe34d00;
 
 	static var PROVIDERS = ["gemini", "anthropic", "ollama", "openai", "deepseek"];
+	// Providers that need an API key, with the name shown in Settings (the others run locally)
+	static var KEY_NAMES = [ "gemini"=>"Gemini", "anthropic"=>"Anthropic", "openai"=>"OpenAI", "deepseek"=>"DeepSeek" ];
 	static var STATUSES  = ["satisfied", "approximated", "impossible", "missing", "unchecked"];
 
 	static var EDIT_MODES : Array<EditMode> = [
@@ -156,6 +158,7 @@ class GldtkSidebar {
 	var jLevelFold        : J;
 	var jSettings         : J;
 	var jSettingsHead     : J;
+	var keySaved          : Map<String,Bool> = new Map();   // provider -> has a key (from GET /settings)
 
 	// Live progress + Cancel (v3 Part 14)
 	var job : Null<GldtkJob>;                  // the running generate / edit / locate
@@ -170,20 +173,22 @@ class GldtkSidebar {
 		onProjectChanged();
 	}
 
-	/** No Gemini key yet (first launch): open Settings so the key form is the first thing seen. **/
+	/** The selected provider needs a key and has none (first launch): open Settings so the key form is the first thing seen. **/
 	function loadSettings() {
 		var jKey = jRoot.find("#g-key");
 		var jMsg = jRoot.find("#g-key-msg");
-		var jState = jRoot.find("#g-key-state");
-		function showHasKey(has:Bool) jState.text( has ? "saved" : "not set" );
 		jRoot.find("#g-key-save").click( (_)->{
+			var provider : String = jProvider.val();
 			var key = StringTools.trim( jKey.val() );
-			if( key == "" ) return;
+			if( key == "" || !KEY_NAMES.exists(provider) ) return;
 			jMsg.text("");
-			request("POST", "/settings", { gemini_api_key:key }, (status, res)->{
-				if( status == 200 && res != null && res.has_key ) {
+			// gemini_api_key also works with a server that predates per-provider keys
+			var body : Dynamic = provider == "gemini" ? { gemini_api_key:key } : { provider:provider, api_key:key };
+			request("POST", "/settings", body, (status, res)->{
+				if( status == 200 && res != null ) readKeys(res);
+				if( keySaved.get(provider) == true ) {
 					jKey.val("");
-					showHasKey(true);
+					refreshKeyField();
 					setSettingsOpen(false);
 				}
 				else
@@ -192,10 +197,36 @@ class GldtkSidebar {
 		});
 		request("GET", "/settings", null, (status, res)->{
 			if( status != 200 || res == null ) return;
-			showHasKey(res.has_key == true);
-			if( res.has_key != true && jProvider.val() == "gemini" )
+			readKeys(res);
+			refreshKeyField();
+			if( needsKey() )
 				setSettingsOpen(true);
 		}, ()->{} );
+	}
+
+	function readKeys(res:Dynamic) {
+		if( res.keys != null )
+			for( p in KEY_NAMES.keys() ) keySaved.set( p, Reflect.field(res.keys, p) == true );
+		else
+			keySaved.set( "gemini", res.has_key == true );
+	}
+
+	function needsKey() : Bool {
+		var provider : String = jProvider.val();
+		return KEY_NAMES.exists(provider) && keySaved.get(provider) != true;
+	}
+
+	/** Key field for the selected provider; a local provider (ollama) shows a note instead. **/
+	function refreshKeyField() {
+		var provider : String = jProvider.val();
+		var name = KEY_NAMES.get(provider);
+		jRoot.find("#g-key-box").toggle( name != null );
+		jRoot.find("#g-key-local").toggle( name == null );
+		jRoot.find("#g-key-msg").text("");
+		if( name == null ) return;
+		jRoot.find("#g-key-name").text('$name API key');
+		jRoot.find("#g-key").attr( "placeholder", 'Paste your $name API key' );
+		jRoot.find("#g-key-state").text( keySaved.get(provider) == true ? "saved" : "not set" );
 	}
 
 	function setSettingsOpen(open:Bool) {
@@ -401,10 +432,13 @@ class GldtkSidebar {
 						<select id="g-provider">$providerOpts</select>
 						<input id="g-model" type="text" placeholder="default model"/>
 					</div>
-					<div class="g-set-label">Gemini API key <span class="g-hint" id="g-key-state"></span></div>
-					<input id="g-key" class="g-key" type="password" placeholder="Paste your Gemini API key" autocomplete="off"/>
-					<button id="g-key-save" class="g-key-save">Save key</button>
-					<div class="g-key-msg" id="g-key-msg"></div>
+					<div id="g-key-box">
+						<div class="g-set-label"><span id="g-key-name">Gemini API key</span> <span class="g-hint" id="g-key-state"></span></div>
+						<input id="g-key" class="g-key" type="password" placeholder="Paste your Gemini API key" autocomplete="off"/>
+						<button id="g-key-save" class="g-key-save">Save key</button>
+						<div class="g-key-msg" id="g-key-msg"></div>
+					</div>
+					<div class="g-set-label" id="g-key-local">Local model &mdash; no key needed</div>
 				</div>
 
 			</div>
@@ -468,6 +502,7 @@ class GldtkSidebar {
 		jProvider.change( _-> {
 			saveStr(PROVIDER_KEY, jProvider.val());
 			updateModelPlaceholder();
+			refreshKeyField();
 		});
 		jModel.on("input", _-> saveStr(MODEL_KEY, StringTools.trim(jModel.val())) );
 
@@ -659,6 +694,7 @@ class GldtkSidebar {
 		jProvider.val( provider != null && PROVIDERS.contains(provider) ? provider : PROVIDERS[0] );
 		var model = loadStr(MODEL_KEY);
 		if( model != null ) jModel.val(model);
+		refreshKeyField();
 		// Every section starts folded: the prompt and Generate are all a new user sees
 		setSettingsOpen(false);
 		setLevelOpen(false);
