@@ -368,6 +368,9 @@
 #gldtk-root .g-prof {
   padding: 2px 2px 4px;
   border-bottom: 1px solid #2e333f;
+  max-height: 240px;
+  overflow-y: auto;
+  flex-shrink: 0;
 }
 #gldtk-root .g-off { opacity: .4; }
 #gldtk-root .g-prof.g-off { pointer-events: none; }
